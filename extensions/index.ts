@@ -1255,7 +1255,7 @@ export default function (pi: ExtensionAPI) {
 				lines.push(`  Saved: ${savedAgo} · ${wf.sizeBytes}B · loadWorkflow: "${wf.name}"`);
 				lines.push("");
 			}
-			ctx.ui.setWidget("saved-workflows", lines);
+			ctx.ui.notify(lines.join("\n"), "info");
 		},
 	});
 
@@ -1291,7 +1291,7 @@ export default function (pi: ExtensionAPI) {
 				lines.push(`  ${agent.description}`);
 				lines.push("");
 			}
-			ctx.ui.setWidget("agents", lines);
+			ctx.ui.notify(lines.join("\n"), "info");
 		},
 	});
 
