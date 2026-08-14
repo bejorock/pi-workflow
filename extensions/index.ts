@@ -51,7 +51,6 @@ import { WorkflowManager } from "./workflow-manager.ts";
 import { openWorkflowNavigator } from "./workflow-ui.ts";
 import { registerTaskPanel } from "./task-panel.ts";
 import { registerWorkflowMode } from "./workflow-mode.ts";
-import { registerBlankStopGuard } from "./blank-stop-guard.ts";
 import { planCreate, planGet, planList, planEdit, planDelete } from "./plan-tool.ts";
 import { openPlansNavigator } from "./plan-ui.ts";
 import {
@@ -1297,12 +1296,6 @@ export default function (pi: ExtensionAPI) {
 
 	// --- Workflow-only mode: /workflow on|off ---
 	registerWorkflowMode(pi, { workflowToolName: workflowTool.name, subagentToolName: "subagent" });
-
-	// --- Blank-stop guard: auto-"continue" on empty model stops ---
-	// Runs in this process and (via pi-args runtimeExtensions) every spawned
-	// subagent, so a model returning content:[]/output:0/stopReason:"stop" is
-	// nudged back to work everywhere with full context intact.
-	registerBlankStopGuard(pi);
 
 	// --- Session start: activate workflow tool & task panel ---
 	pi.on("session_start", (_event, ctx) => {
