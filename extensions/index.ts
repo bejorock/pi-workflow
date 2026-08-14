@@ -52,6 +52,8 @@ import { WorkflowManager } from "./workflow-manager.ts";
 import { openWorkflowNavigator } from "./workflow-ui.ts";
 import { registerTaskPanel } from "./task-panel.ts";
 import { registerWorkflowMode } from "./workflow-mode.ts";
+import { registerBlankStopGuard } from "./blank-stop-guard.ts";
+import { loadAgentSettings } from "./agent-settings.ts";
 import { planCreate, planGet, planList, planEdit, planDelete } from "./plan-tool.ts";
 import { openPlansNavigator } from "./plan-ui.ts";
 import {
