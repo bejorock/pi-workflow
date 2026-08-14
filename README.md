@@ -528,6 +528,21 @@ Or to disable all built-ins globally:
 }
 ```
 
+### 3. Extension behaviour toggles
+
+Top-level keys (outside `agents`) control extension behaviour. Currently supported:
+
+```json
+{
+  "blankStopGuard": false
+}
+```
+
+- `blankStopGuard`: disables the auto-"continue" guard for empty model completions
+  (see "Production behaviour"). Defaults to enabled when absent. Read once at process
+  start from the directory pi runs in; commit the file to git so worktree-isolated
+  subagent runs also see it.
+
 ### 3. Shadowing (Full file replacement)
 
 You can override a built-in agent completely by creating a markdown file with the exact same name in your agent directories:
@@ -892,6 +907,11 @@ sends at most 3 times for consecutive blanks, resets after any healthy turn, and
 interferes with retry/compaction — those are checked before the guard's queued message. If the
 model stays blank after 3 nudges, the empty result flows out unchanged and workflow-level
 backstops (retry edges) remain the last line of defense.
+
+Set `"blankStopGuard": false` in `.pi-workflow/settings.json` to disable it for the whole
+project (default: enabled). The setting is read once at process start from the directory pi
+runs in — main agent and every subagent — so commit the file to git if you want the toggle to
+apply inside worktree-isolated runs.
 
 ## Compatibility
 

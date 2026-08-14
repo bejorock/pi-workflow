@@ -162,6 +162,23 @@ describe("loadAgentSettings", () => {
 		expect(result.sources).toHaveLength(1);
 	});
 
+	it("copies blankStopGuard through the merge loop", () => {
+		writeProjectSettings({ blankStopGuard: false });
+
+		const result = loadAgentSettings(tempDir, { userSettingsPath });
+
+		// The merge loop must copy this field explicitly — adding it to the
+		// interface alone silently drops it, which would make the toggle a
+		// no-op that looks shipped.
+		expect(result.blankStopGuard).toBe(false);
+	});
+
+	it("resolves blankStopGuard as undefined when no file sets it", () => {
+		const result = loadAgentSettings(tempDir, { userSettingsPath });
+
+		expect(result.blankStopGuard).toBeUndefined();
+	});
+
 	it("merges user and project settings per-agent, project winning", () => {
 		fs.writeFileSync(
 			userSettingsPath,

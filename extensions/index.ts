@@ -17,6 +17,7 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { CONFIG_DIR_NAME, getAgentDir, type AgentToolResult, type ExtensionAPI, defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.ts";
+import { loadAgentSettings } from "./agent-settings.ts";
 import { buildAgentCatalogGuideline, createListAgentsTool } from "./agent-catalog.ts";
 import { createGraphWorkflowTool } from "./graph-tool.ts";
 import { installResultDelivery, stageRunReport } from "./result-delivery.ts";
@@ -1297,6 +1298,21 @@ export default function (pi: ExtensionAPI) {
 	// --- Workflow-only mode: /workflow on|off ---
 	registerWorkflowMode(pi, { workflowToolName: workflowTool.name, subagentToolName: "subagent" });
 
+	// --- Blank-stop guard: auto-"continue" on empty model stops ---
+	// Runs in this process and (via pi-args runtimeExtensions) every spawned
+	// subagent, so a model returning content:[]/output:0/stopReason:"stop" is
+	// nudged back to work everywhere with full context intact.
+	//
+	// Registration stays here at factory level (never moved into a lifecycle
+	// event): factory registration runs exactly once per process and before
+	// any turn, unconditionally. The enabled toggle is resolved from
+	// .pi-workflow/settings.json — process.cwd() is the project dir pi
+	// operates on (main process), or the spawn cwd for children (project or
+	// worktree), so the file resolves the same way in both. loadAgentSettings
+	// never throws: missing/malformed files yield defaults, so a broken
+	// settings file can never break extension load.
+	const blankStopSettings = loadAgentSettings(process.cwd());
+	registerBlankStopGuard(pi, { enabled: blankStopSettings.blankStopGuard !== false });
 	// --- Session start: activate workflow tool & task panel ---
 	pi.on("session_start", (_event, ctx) => {
 		setBrokerContext(ctx);

@@ -50,6 +50,13 @@ export interface AgentSettings {
 	disableBuiltins?: boolean;
 	/** Per-agent overrides, keyed by agent name. */
 	agents?: Record<string, AgentOverride>;
+	/**
+	 * Disable the blank-stop guard (auto-"continue" when a model returns an
+	 * empty completion). Defaults to enabled when absent. Read once at
+	 * process start, so it affects the main agent and every subagent that
+	 * loads this extension in a directory where the settings file exists.
+	 */
+	blankStopGuard?: boolean;
 }
 
 export interface ResolvedAgentSettings extends AgentSettings {
@@ -112,6 +119,10 @@ export function loadAgentSettings(cwd: string, options: { userSettingsPath?: str
 
 		if (settings.disableBuiltins !== undefined) {
 			resolved.disableBuiltins = settings.disableBuiltins;
+		}
+
+		if (settings.blankStopGuard !== undefined) {
+			resolved.blankStopGuard = settings.blankStopGuard;
 		}
 
 		if (settings.agents && typeof settings.agents === "object") {
