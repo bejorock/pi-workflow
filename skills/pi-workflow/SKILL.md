@@ -547,7 +547,7 @@ You can switch the execution mode of the session using the `/wf` command to enfo
 
 * **`/wf normal`** (or `/wf build`): The default mode. All tools are enabled, and the agent can write files directly or delegate.
 * **`/wf plan`**: Read-only mode. Blocks all write tools (`write`, `edit`) and delegation tools (`subagent`, `workflow`). Restricts `bash` to read-only commands (e.g. `cat`, `grep`, `ls`, `git diff`). Use this for safe, modification-free planning and codebase research.
-* **`/wf workflow`**: Enforced delegation mode. Blocks direct writes (`write`, `edit`) and direct subagents (`subagent`). Forces the agent to write a graph script and execute it via the `workflow` tool for any file changes or task delegation. `read`, read-only `bash`, `grep`, `find`, `ls`, `workflow`, `workflow_status`, `list_agents`, and `list_workflows` remain available.
+* **`/wf workflow`**: Enforced delegation mode. Blocks direct writes (`write`, `edit`) and direct subagents (`subagent`). Forces the agent to write a graph script and execute it via the `workflow` tool for any file changes or task delegation. `read`, read-only `bash`, `grep`, `find`, `ls`, `workflow`, `workflow_status`, `workflow_stop`, `list_agents`, and `list_workflows` remain available.
 
 Use the `list_workflows` tool to discover available pre-built and saved workflows (such as "tdd" and "review_loop") that you can run instantly via the `loadWorkflow` parameter. Use the `list_agents` tool to discover available subagents and their roles.
 
@@ -703,6 +703,19 @@ Summarizes every agent's status/error/result preview in the run.
 workflow_status({ runId: "wf-1234567890", agentId: 2 })
 ```
 Returns one agent's full prompt, complete (untruncated) result, and tool-call/output history — use this to see exactly what a failing (or any) agent did before it failed, without needing the interactive `/workflows` TUI.
+
+### Stopping a run: `workflow_stop`
+
+```
+workflow_stop({ runId: "wf-1234567890" })
+```
+Cancels a running workflow — the same action as pressing `x` in the `/workflows` TUI, but callable directly. In-flight nodes are aborted; results already recorded stay in the run journal, so the run can still be resumed later with `resumeRunId`. Call with no arguments to list every workflow currently running:
+
+```
+workflow_stop()
+```
+
+Only runs tracked live in this process can actually be stopped — a run visible solely as a persisted journal entry (started by a different session/process) is reported as not stoppable from here.
 
 ## Common Patterns
 

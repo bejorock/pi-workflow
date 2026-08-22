@@ -68,7 +68,7 @@ function makeMockPi() {
 	const commands: Record<string, MockCommandHandler> = {};
 	const toolCallHandlers: Array<(event: { toolName: string; input: Record<string, unknown> }) => Promise<ToolCallBlockResult | undefined>> = [];
 	const beforeAgentStartHandlers: Array<(event: { systemPrompt: string }) => Promise<SystemPromptResult | undefined>> = [];
-	let activeTools = ["read", "bash", "edit", "write", "grep", "find", "ls", "subagent", "workflow", "workflow_status"];
+	let activeTools = ["read", "bash", "edit", "write", "grep", "find", "ls", "subagent", "workflow", "workflow_status", "workflow_stop"];
 
 	const mock = {
 		commands,
@@ -182,6 +182,7 @@ describe("registerWorkflowMode /wf modes", () => {
 		expect(pi.activeTools).not.toContain("subagent_wait");
 		expect(pi.activeTools).toContain("workflow");
 		expect(pi.activeTools).toContain("workflow_status");
+		expect(pi.activeTools).toContain("workflow_stop");
 		expect(pi.activeTools).toContain("read");
 		expect(pi.activeTools).toContain("bash");
 		expect(ctx.notifications[0].message).toContain("WORKFLOW");
@@ -229,6 +230,8 @@ describe("registerWorkflowMode /wf modes", () => {
 		expect(res?.block).toBe(true);
 		res = await pi.fireToolCall({ toolName: "workflow_reply", input: { requestId: "x", answer: "y" } });
 		expect(res?.block).toBe(true);
+		res = await pi.fireToolCall({ toolName: "workflow_stop", input: { runId: "x" } });
+		expect(res?.block).toBe(true);
 		res = await pi.fireToolCall({ toolName: "ask_supervisor", input: { question: "q" } });
 		expect(res?.block).toBe(true);
 		res = await pi.fireToolCall({ toolName: "subagent_wait", input: { status: true } });
@@ -241,6 +244,8 @@ describe("registerWorkflowMode /wf modes", () => {
 		// Workflow mode allows workflow/workflow_status but blocks subagent_wait
 		await pi.commands.wf.handler("workflow", ctx);
 		res = await pi.fireToolCall({ toolName: "workflow", input: { script: "" } });
+		expect(res).toBeUndefined();
+		res = await pi.fireToolCall({ toolName: "workflow_stop", input: { runId: "x" } });
 		expect(res).toBeUndefined();
 		res = await pi.fireToolCall({ toolName: "subagent_wait", input: { status: true } });
 		expect(res?.block).toBe(true);
