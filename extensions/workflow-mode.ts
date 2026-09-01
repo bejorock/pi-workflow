@@ -20,7 +20,7 @@ export interface WorkflowModeState {
 const PLAN_MODE_DISABLED_TOOLS = new Set<string>([
 	"write", "edit",
 	"subagent", "subagent_wait",
-	"workflow", "workflow_status", "workflow_reply",
+	"workflow", "workflow_status", "workflow_stop", "workflow_reply",
 	"ask_supervisor",
 	"list_agents", "list_workflows",
 ]);
@@ -99,7 +99,7 @@ export const PLAN_MODE_SYSTEM_DIRECTIVE = `## PLAN MODE ACTIVE
 
 You are in **plan mode** — read-only planning and investigation.
 - Direct file mutations (\`write\`/\`edit\`) are disabled.
-- All subagent and workflow tools are disabled (\`subagent\`, \`subagent_wait\`, \`workflow\`, \`workflow_status\`, \`workflow_reply\`, \`ask_supervisor\`, \`list_agents\`, \`list_workflows\`).
+- All subagent and workflow tools are disabled (\`subagent\`, \`subagent_wait\`, \`workflow\`, \`workflow_status\`, \`workflow_stop\`, \`workflow_reply\`, \`ask_supervisor\`, \`list_agents\`, \`list_workflows\`).
 - Bash is restricted to read-only commands (e.g. \`cat\`, \`grep\`, \`ls\`, \`git status\`, \`git diff\`).
 - Focus on planning, discussing architectural designs, researching code, and answering questions. Do not attempt to write code or delegate to agents.`;
 
@@ -124,7 +124,7 @@ For any task that requires changing files or delegating to an agent:
      * \`human(prompt | promptFn, { options, default })\` to ask the user.
    - Route between them with \`g.edge(from, to)\` or conditional \`g.edge(from, (state, result) => target)\`.
 5. Use the \`list_workflows\` tool to see available pre-built and saved workflows (such as "tdd" and "review_loop") that you can run instantly via the \`loadWorkflow\` parameter.
-6. Use \`workflow_status\` to inspect a run's progress or investigate a failure.
+6. Use \`workflow_status\` to inspect a run's progress or investigate a failure, and \`workflow_stop\` to cancel a run that is misbehaving or no longer needed.
 
 If the user's request is purely conversational or a question that needs no file changes or delegation,
 just answer directly — workflow mode does not force you to call the \`workflow\` tool for every message,
@@ -158,13 +158,13 @@ export function registerWorkflowMode(
 		const kept = activeToolNames.filter((name) => !disabled.has(name));
 		// Make sure core workflow tools are available if the mode is workflow
 		if (mode === "workflow") {
-			return [...new Set([...kept, "workflow", "workflow_status", "list_agents", "list_workflows"])];
+			return [...new Set([...kept, "workflow", "workflow_status", "workflow_stop", "list_agents", "list_workflows"])];
 		}
 		if (mode === "plan") {
 			// Plan mode: read-only investigation only, no subagent/workflow tools at all
 			return kept;
 		}
-		return [...new Set([...kept, "write", "edit", "subagent", "workflow", "workflow_status"])];
+		return [...new Set([...kept, "write", "edit", "subagent", "workflow", "workflow_status", "workflow_stop"])];
 	}
 
 	function setMode(mode: SessionMode, ctx?: ExtensionContext): void {
@@ -251,7 +251,7 @@ export function registerWorkflowMode(
 	const disabledInPlan = new Set<string>([
 		"write", "edit",
 		"subagent", "subagent_wait",
-		"workflow", "workflow_status", "workflow_reply",
+		"workflow", "workflow_status", "workflow_stop", "workflow_reply",
 		"ask_supervisor",
 		"list_agents", "list_workflows",
 	]);

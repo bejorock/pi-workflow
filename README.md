@@ -717,6 +717,16 @@ Lists all available workflows across all three scopes (built-in, user-global, an
 
 Inspects a run's progress or investigates a failure.
 
+### `workflow_stop`
+
+Stops a running workflow graph before it finishes — the same action as pressing `x` in the
+`/workflows` TUI, but callable by an agent. Call with no `runId` to list every workflow currently
+running (so you can pick the right one); call with `runId` to stop it. In-flight nodes are
+aborted; results already recorded stay in the run journal, so a stopped run can still be resumed
+later with `resumeRunId`. Only runs tracked live in this process can actually be stopped — a run
+visible solely as a persisted journal entry (started by a different session/process) is reported
+as not stoppable from here rather than silently ignored.
+
 ### `plan` *(always injected)*
 
 Creates and manages Markdown plans stored in `.pi-workflow/plans/`. Available in **all modes**

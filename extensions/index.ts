@@ -329,6 +329,121 @@ export function registerWorkflowStatusTool(pi: ExtensionAPI, workflowManager: Wo
 	});
 }
 
+const WorkflowStopParams = Type.Object({
+	runId: Type.Optional(
+		Type.String({
+			description:
+				"The workflow run ID to stop (e.g. from a workflow tool call's runId, workflow_status, or /workflows). Omit to list every workflow currently running instead of stopping one.",
+		}),
+	),
+});
+
+/**
+ * Registers the `workflow_stop` tool, so an agent can cancel a run it started
+ * (or is investigating) without needing the interactive /workflows TUI.
+ *
+ * Mirrors registerWorkflowStatusTool's cross-process lookup: a run only
+ * visible as a persisted journal entry in this process (started by a
+ * different session) has no in-memory abortController here, so it cannot
+ * actually be signalled — that is reported rather than silently no-opped.
+ */
+export function registerWorkflowStopTool(pi: ExtensionAPI, workflowManager: WorkflowManager) {
+	pi.registerTool({
+		name: "workflow_stop",
+		label: "Workflow Stop",
+		description: [
+			"Stops a running workflow graph before it finishes, aborting every in-flight node.",
+			"Call with runId to stop that run. Call with no arguments to list every workflow currently running, so you can pick the right runId.",
+			"Only runs started in this process can actually be stopped here — a run visible only as a persisted journal entry (e.g. started by a different session) cannot be aborted this way.",
+		].join(" "),
+		promptSnippet: "Stop a running workflow graph by runId; omit runId to list running workflows.",
+		parameters: WorkflowStopParams,
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			if (!params.runId) {
+				const running = workflowManager.listRunningRuns();
+				if (running.length === 0) {
+					return {
+						content: [{ type: "text", text: "No workflows are currently running." }],
+						details: { running: [] },
+					};
+				}
+				const lines = running.map(
+					(r) => `  - ${r.runId}: "${r.snapshot.meta.name}" \u2014 ${r.snapshot.agents.length} node execution(s) so far`,
+				);
+				return {
+					content: [
+						{
+							type: "text",
+							text: `${running.length} workflow${running.length === 1 ? "" : "s"} currently running:\n\n${lines.join("\n")}\n\nCall workflow_stop again with one of these runIds to stop it.`,
+						},
+					],
+					details: { running: running.map((r) => ({ runId: r.runId, name: r.snapshot.meta.name })) },
+				};
+			}
+
+			const run = workflowManager.getRun(params.runId);
+			if (!run) {
+				// Same cross-process gap as workflow_status: a process that never
+				// itself ran this workflow has no journalDir set yet.
+				if (!workflowManager.getJournalDir() && ctx.cwd) {
+					workflowManager.setJournalDir(`${ctx.cwd}/.pi-workflow/runs`);
+				}
+				const persisted = workflowManager.listRuns().find((r) => r.runId === params.runId);
+				if (!persisted) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `No workflow run found with runId "${params.runId}". It may have already completed and been pruned, or the ID is incorrect.`,
+							},
+						],
+						details: { stopped: false, found: false },
+						isError: true,
+					};
+				}
+				// Found only in the journal: no in-memory abortController exists for
+				// it in this process, so there is nothing here that can signal it.
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Workflow "${persisted.workflowName}" (${params.runId}) is recorded as "${persisted.status}" but is not tracked live in this process, so it cannot be stopped from here. ${persisted.status === "running" ? "It was likely started by a different session/process \u2014 stop it from that session's /workflows panel instead." : "It is not currently running."}`,
+						},
+					],
+					details: { stopped: false, found: true, persisted: true, status: persisted.status },
+					isError: persisted.status === "running",
+				};
+			}
+
+			if (run.status !== "running") {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Workflow "${run.snapshot.meta.name}" (${params.runId}) is not running \u2014 its status is "${run.status}".`,
+						},
+					],
+					details: { stopped: false, found: true, status: run.status },
+				};
+			}
+
+			const stopped = workflowManager.stopRun(params.runId);
+			return {
+				content: [
+					{
+						type: "text",
+						text: stopped
+							? `Stopped workflow "${run.snapshot.meta.name}" (${params.runId}). In-flight nodes are being aborted; node results already recorded remain in the run journal. Resume it later with resumeRunId: "${params.runId}" if desired.`
+							: `Could not stop workflow "${run.snapshot.meta.name}" (${params.runId}).`,
+					},
+				],
+				details: { stopped, runId: params.runId },
+				isError: !stopped,
+			};
+		},
+	});
+}
+
 export default function (pi: ExtensionAPI) {
 	const globalWorkflowManager = new WorkflowManager();
 
@@ -862,6 +977,7 @@ export default function (pi: ExtensionAPI) {
 	const workflowTool = createGraphWorkflowTool({ workflowManager: globalWorkflowManager, broker: globalBroker });
 	pi.registerTool(workflowTool);
 	registerWorkflowStatusTool(pi, globalWorkflowManager);
+	registerWorkflowStopTool(pi, globalWorkflowManager);
 
 	// Runs are background-only, so a graph's report is not a tool result. It is
 	// injected into the conversation when the walk finishes; without this, a

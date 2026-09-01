@@ -896,18 +896,24 @@ export function openWorkflowNavigator(
 							cleanup();
 							done(undefined);
 							break;
-						case "stop":
-							if (state.runId) manager.stopRun(state.runId);
+						case "stop": {
+							const targetRunId = state.kind === "runs" ? runs[state.cursor]?.runId : state.runId;
+							if (targetRunId) manager.stopRun(targetRunId);
 							rerender();
 							break;
-						case "pause":
-							if (state.runId) manager.pauseRun(state.runId);
+						}
+						case "pause": {
+							const targetRunId = state.kind === "runs" ? runs[state.cursor]?.runId : state.runId;
+							if (targetRunId) manager.pauseRun(targetRunId);
 							rerender();
 							break;
-						case "resume":
-							if (state.runId) manager.resumeRun(state.runId);
+						}
+						case "resume": {
+							const targetRunId = state.kind === "runs" ? runs[state.cursor]?.runId : state.runId;
+							if (targetRunId) manager.resumeRun(targetRunId);
 							rerender();
 							break;
+						}
 						case "save": {
 							const targetRunId = state.kind === "runs" ? runs[state.cursor]?.runId : state.runId;
 							if (targetRunId) void saveRunWorkflow(manager, targetRunId, ui);
