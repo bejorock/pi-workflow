@@ -22,6 +22,8 @@ import type { NodeStateBuffers } from "./node-state-reducer.ts";
 import type { CommandNodeDef, GraphNode, GraphState } from "./graph-dsl.ts";
 import type { NodeRunOutcome, NodeRunner } from "./graph-executor.ts";
 import type { RequestBroker } from "./request-broker.ts";
+import { plansDir } from "./plan-tool.ts";
+import { contractsDir } from "./contract-tool.ts";
 import {
 	type ArtifactConfig,
 	type ForkContextOptions,
@@ -375,8 +377,52 @@ export function createNodeRunner(options: CreateNodeRunnerOptions): NodeRunner {
 				const def = node.def;
 				const prompt = def.promptFn(state);
 
+				// Prepare artifact preview if requested
+				let artifactPreview: string | undefined;
+				if (def.artifacts && def.artifacts.length > 0) {
+					const sections: string[] = [];
+					for (const art of def.artifacts) {
+						if (art === "plan") {
+							const pDir = plansDir(options.cwd);
+							if (fs.existsSync(pDir)) {
+								const files = fs.readdirSync(pDir).filter((f) => f.endsWith(".md"));
+								for (const f of files) {
+									try {
+										const content = fs.readFileSync(path.join(pDir, f), "utf-8");
+										sections.push(`### 📋 Plan: ${f.slice(0, -3)}\n\n${content}`);
+									} catch {
+										// ignore unreadable files
+									}
+								}
+							}
+						} else if (art === "contract") {
+							const cDir = contractsDir(options.cwd);
+							if (fs.existsSync(cDir)) {
+								const files = fs.readdirSync(cDir).filter((f) => f.endsWith(".md"));
+								for (const f of files) {
+									try {
+										const content = fs.readFileSync(path.join(cDir, f), "utf-8");
+										sections.push(`### 📜 Contract: ${f.slice(0, -3)}\n\n${content}`);
+									} catch {
+										// ignore unreadable files
+									}
+								}
+							}
+						}
+					}
+					if (sections.length > 0) {
+						artifactPreview = sections.join("\n\n---\n\n");
+					}
+				}
+
 				// Route through RequestBroker if present (for background execution / IPC).
 				if (options.broker) {
+					const optionsList = def.options?.map((o, idx) => ({
+						label: o,
+						// Attach artifact preview to the first option (typically "Approve") if present
+						preview: idx === 0 && artifactPreview ? artifactPreview : undefined,
+					}));
+
 					const result = await options.broker.ask({
 						runId: context.runId,
 						nodeId: node.id,
@@ -385,7 +431,7 @@ export function createNodeRunner(options: CreateNodeRunnerOptions): NodeRunner {
 							{
 								question: prompt,
 								header: node.id,
-								options: def.options?.map((o) => ({ label: o })),
+								options: optionsList,
 							},
 						],
 						default: def.default,

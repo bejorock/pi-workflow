@@ -58,6 +58,8 @@ export interface CommandNodeOptions {
  */
 export type EdgeConditionFn = (state: GraphState, result: unknown) => string | EndSymbol;
 
+export type ArtifactKind = "plan" | "contract";
+
 export interface HumanNodeOptions {
 	/** Presented as a fixed set of choices rather than free text. */
 	options?: string[];
@@ -67,6 +69,12 @@ export interface HumanNodeOptions {
 	 * explicit default the author chose.
 	 */
 	default?: string;
+	/**
+	 * Artifacts to preview in the interactive human dialog (e.g. ['plan', 'contract']).
+	 * When provided, the dialog renders the latest plan/contract documents
+	 * in the preview pane so the reviewer can inspect them before deciding.
+	 */
+	artifacts?: ArtifactKind[];
 }
 
 export interface AgentNodeDef {
@@ -80,6 +88,7 @@ export interface HumanNodeDef {
 	promptFn: PromptFn;
 	options?: string[];
 	default?: string;
+	artifacts?: ArtifactKind[];
 }
 
 /**
@@ -252,11 +261,22 @@ export function human(prompt: string | PromptFn, options: HumanNodeOptions = {})
 			`human() default "${options.default}" is not one of the provided options`,
 		);
 	}
+	if (options.artifacts !== undefined) {
+		if (!Array.isArray(options.artifacts)) {
+			throw new GraphDefinitionError("human() artifacts must be an array of 'plan' | 'contract'");
+		}
+		for (const a of options.artifacts) {
+			if (a !== "plan" && a !== "contract") {
+				throw new GraphDefinitionError(`human() unknown artifact kind "${a}". Expected 'plan' or 'contract'.`);
+			}
+		}
+	}
 	return {
 		type: "human",
 		promptFn,
 		options: options.options ? [...options.options] : undefined,
 		default: options.default,
+		artifacts: options.artifacts ? [...options.artifacts] : undefined,
 	};
 }
 

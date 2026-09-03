@@ -223,6 +223,7 @@ Workflows support two distinct ways to bring external judgment or decisions into
 1. **Interactive Nodes (`human(...)`)**
    - **Purpose:** Structural gates defined explicitly in the graph routing.
    - **Usage:** The workflow walk pauses at this node. The user is prompted (via a custom TUI or command line) for input before routing continues.
+   - **Artifact Previews:** Pass `artifacts: ['plan', 'contract']` in options to render the project's active plans and contracts in the preview pane so the human can review full specs before deciding.
    - **Rule:** Always specify a `default` fallback for human nodes so a headless run (no TUI) does not hang.
 
 2. **In-Flight Tools (`ask_user_question`, `ask_supervisor`)**

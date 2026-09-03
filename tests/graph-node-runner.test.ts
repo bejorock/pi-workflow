@@ -721,6 +721,48 @@ describe("createNodeRunner: interactive nodes", () => {
 		expect(outcome.result).toMatchObject({ status: "ok", answer: "thorough" });
 		expect(`${outcome.result}`).toBe("thorough");
 	});
+
+	it("attaches artifact previews when artifacts option is specified", async () => {
+		const broker = new RequestBroker({ coalesceMs: 0 });
+		const tempCwd = `/tmp/test-wf-${Date.now()}`;
+		fs.mkdirSync(`${tempCwd}/.pi-workflow/plans`, { recursive: true });
+		fs.writeFileSync(`${tempCwd}/.pi-workflow/plans/plan-1.md`, "# Sample Plan\nContent here");
+
+		const runner = createNodeRunner({
+			cwd: tempCwd,
+			runId: "r1",
+			spawnAgent: vi.fn() as never,
+			broker,
+		});
+
+		let brokerReceivedOptions: Array<{ label: string; preview?: string }> | undefined;
+		broker.onBatch((batch) => {
+			brokerReceivedOptions = batch[0].questions[0].options;
+			broker.resolve(batch[0].id, {
+				source: "human",
+				text: "yes",
+				answers: {
+					questions: [{ questionIndex: 0, kind: "option", answer: "yes" }],
+					cancelled: false,
+				},
+			});
+		});
+
+		const node = {
+			id: "ask",
+			def: human("Approve?", {
+				options: ["yes", "no"],
+				artifacts: ["plan"],
+				default: "yes",
+			}),
+		};
+		const outcomePromise = runner(node, {}, { step: 1, runId: "r1" });
+		broker.tick();
+		await outcomePromise;
+
+		expect(brokerReceivedOptions?.[0].preview).toContain("Sample Plan");
+		fs.rmSync(tempCwd, { recursive: true, force: true });
+	});
 });
 
 describe("end to end: escalation through a real runner", () => {

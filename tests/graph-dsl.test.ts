@@ -85,6 +85,16 @@ describe("node constructors", () => {
 				/not one of the provided options/,
 			);
 		});
+
+		it("accepts valid artifacts option", () => {
+			const node = human("Approve?", { artifacts: ["plan", "contract"] });
+			expect(node.artifacts).toEqual(["plan", "contract"]);
+		});
+
+		it("rejects invalid artifacts option", () => {
+			// @ts-expect-error deliberately invalid artifact
+			expect(() => human("q", { artifacts: ["invalid"] })).toThrow(/unknown artifact kind/);
+		});
 	});
 });
 
