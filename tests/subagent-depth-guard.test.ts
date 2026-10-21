@@ -93,16 +93,16 @@ describe("subagent recursion-depth guard", () => {
 			expect(result.error).toMatch(/max=1/);
 		});
 
-		it("does not block below the depth ceiling", async () => {
+		it("does not block below the depth ceiling", { timeout: 30_000 }, async () => {
 			process.env.PI_SUBAGENT_DEPTH = "0";
 			process.env.PI_SUBAGENT_MAX_DEPTH = "2";
 
 			// Below the cap, runSingleAgent proceeds past the depth check and
-			// into real spawn setup, which will fail for an unrelated reason
-			// (no real pi binary / model in this unit-test environment) --
-			// We pass a bogus model so buildModelCandidates throws synchronously,
-			// failing the spawn immediately without actually launching process
-			// wait times, allowing us to verify the specific error thrown.
+			// into real spawn setup. The bogus model name is NOT rejected
+			// synchronously (the scope check only guards fallback candidates),
+			// so a real child `pi` is spawned and fails on the unknown model.
+			// That child startup is slow under pi >= 1.0 (theme/catalog boot),
+			// hence the explicit timeout above: this test spawns a real process.
 			const result = await runSingleAgent("/tmp", makeAgent({ model: "nonexistent-fake-model" }), "do something", {
 				runId: "depth-guard-test-3",
 				availableModels: [],

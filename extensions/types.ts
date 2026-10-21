@@ -5,7 +5,7 @@
 import * as os from "node:os";
 import * as path from "node:path";
 import type { EventEmitter } from "node:events";
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, Model, ProviderHeaders } from "@earendil-works/pi-ai";
 import type { Message } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 export type ReadonlySessionManager = ExtensionContext["sessionManager"];
@@ -22,8 +22,14 @@ export interface ForkContextOptions {
 	sessionManager: ReadonlySessionManager;
 	modelRegistry: {
 		find(provider: string, modelId: string): Model<Api> | undefined;
+		/**
+		 * Headers come back as `ProviderHeaders` (`Record<string, string | null>`):
+		 * a `null` value is a header-deletion marker, not a real value. Consumers
+		 * that forward these to a plain `Record<string, string>` API (like
+		 * generateSummaryWithUsage) must filter nulls out first.
+		 */
 		getApiKeyAndHeaders(model: Model<Api>): Promise<
-			| { ok: true; apiKey?: string; headers?: Record<string, string>; env?: Record<string, string> }
+			| { ok: true; apiKey?: string; headers?: ProviderHeaders; env?: Record<string, string> }
 			| { ok: false; error: string }
 		>;
 	};

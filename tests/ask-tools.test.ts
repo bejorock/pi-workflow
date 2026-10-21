@@ -6,7 +6,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionToolContext } from "@earendil-works/pi-coding-agent";
 import {
 	createAskUserQuestionTool,
 	createAskSupervisorTool,
@@ -44,7 +44,7 @@ describe("Ask Tools in Parent Process (direct UI calling)", () => {
 		const ctx = {
 			mode: "tui",
 			ui: { custom },
-		} as unknown as ExtensionContext;
+		} as unknown as ExtensionToolContext;
 
 		const tool = createAskUserQuestionTool();
 		const res: any = await tool.execute(
@@ -75,7 +75,7 @@ describe("Ask Tools in Parent Process (direct UI calling)", () => {
 			{ questions: [] } as never,
 			undefined,
 			undefined,
-			{ mode: "tui", ui: { custom: vi.fn() } } as unknown as ExtensionContext,
+			{ mode: "tui", ui: { custom: vi.fn() } } as unknown as ExtensionToolContext,
 		);
 
 		expect(res.details.error).toBe("no_questions");

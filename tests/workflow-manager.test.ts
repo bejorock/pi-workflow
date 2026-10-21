@@ -1,4 +1,4 @@
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionToolContext } from "@earendil-works/pi-coding-agent";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -392,7 +392,7 @@ g.run();`;
 		await tool.execute("call-1", { script }, undefined, undefined, {
 			cwd: tempDir,
 			sessionManager: { getSessionId: () => "s1" },
-		} as unknown as ExtensionContext);
+		} as unknown as ExtensionToolContext);
 		// The run outlives the tool call, so wait for it before reading state.
 		await tracker.settled();
 
@@ -436,7 +436,7 @@ g.run();`;
 		const result = await tool.execute("call-1", { script }, undefined, undefined, {
 			cwd: tempDir,
 			sessionManager: { getSessionId: () => "s1" },
-		} as unknown as ExtensionContext);
+		} as unknown as ExtensionToolContext);
 		await tracker.settled();
 		const runId = (result.details as { runId: string }).runId;
 
@@ -494,7 +494,7 @@ g.run();`;
 		await tool.execute("call-2", { script }, undefined, undefined, {
 			cwd: tempDir,
 			sessionManager: { getSessionId: () => "s1" },
-		} as unknown as ExtensionContext);
+		} as unknown as ExtensionToolContext);
 		await tracker.settled();
 
 		const runs = manager.listRuns();

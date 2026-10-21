@@ -23,7 +23,7 @@ import {
 	type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import type { ReadonlySessionManager } from "./types.ts";
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, Model, ProviderHeaders } from "@earendil-works/pi-ai";
 
 export interface ForkContextInput {
 	/** Read-only session manager for the parent session. */
@@ -31,8 +31,14 @@ export interface ForkContextInput {
 	/** Model registry, used to resolve a summarization model + auth. */
 	modelRegistry: {
 		find(provider: string, modelId: string): Model<Api> | undefined;
+		/**
+		 * `headers` is `ProviderHeaders` (`Record<string, string | null>`): a
+		 * `null` value is a header-deletion marker from newer pi, not a real
+		 * value. Filtered out before being forwarded to
+		 * `generateSummaryWithUsage`, which still wants plain string values.
+		 */
 		getApiKeyAndHeaders(model: Model<Api>): Promise<
-			{ ok: true; apiKey?: string; headers?: Record<string, string>; env?: Record<string, string> } | { ok: false; error: string }
+			{ ok: true; apiKey?: string; headers?: ProviderHeaders; env?: Record<string, string> } | { ok: false; error: string }
 		>;
 	};
 	/** Fallback model to use for summarization if no explicit preference is given. */
@@ -108,13 +114,22 @@ async function generateForkSummaryUncached(input: ForkContextInput): Promise<For
 	const auth = await input.modelRegistry.getApiKeyAndHeaders(model);
 	if (!auth.ok) return undefined;
 
+	// generateSummaryWithUsage wants plain string header values; ProviderHeaders
+	// allows null as a deletion marker, which is meaningless outside a real
+	// provider request, so nulls are dropped rather than forwarded.
+	const headers = auth.headers
+		? (Object.fromEntries(
+				Object.entries(auth.headers).filter(([, v]) => v !== null),
+			) as Record<string, string>)
+		: undefined;
+
 	try {
 		const { text } = await generateSummaryWithUsage(
 			messages,
 			model,
 			input.reserveTokens ?? 16384,
 			auth.apiKey,
-			auth.headers,
+			headers,
 			input.signal,
 			input.customInstructions,
 			undefined, // previousSummary — always fresh for fork (no iterative state to maintain)
