@@ -16,6 +16,7 @@ import {
 	type TUIAnswer,
 } from "./ask-user-question-tui.ts";
 import { ChannelClient } from "./channel.ts";
+import type { RequestBroker } from "./request-broker.ts";
 
 // ── Schemas ──────────────────────────────────────────────────────────────
 
@@ -75,10 +76,11 @@ function formatToolResultText(
 /**
  * The `ask_user_question` tool.
  *
- * Full-parity custom TUI questionnaire. Available to both main agent (runs
- * in-process) and child agents (routes through the filesystem channel).
+ * Full-parity custom TUI questionnaire. Child agents route through the
+ * filesystem channel; a parent may use the shared RequestBroker so optional
+ * external interaction sinks receive the same request as the local TUI.
  */
-export function createAskUserQuestionTool(): ToolDefinition {
+export function createAskUserQuestionTool(broker?: RequestBroker): ToolDefinition {
 	return defineTool({
 		name: "ask_user_question",
 		label: "Ask User Question",
@@ -132,7 +134,30 @@ export function createAskUserQuestionTool(): ToolDefinition {
 				};
 			}
 
-			// 3. Parent process: TUI execution
+			// 3. Parent process: shared broker. This is intentionally after
+			// validation and the child check: it preserves the existing tool schema
+			// while making direct parent asks visible to optional interaction sinks.
+			if (broker) {
+				const result = await broker.ask({
+					id: `parent-ask:${_id}`,
+					runId: "parent",
+					kind: "human",
+					questions,
+					expectsReply: true,
+				});
+				const cancelled = result.source === "cancelled" || result.source === "timeout";
+				const answers = result.answers?.questions ?? [];
+				return {
+					content: [{ type: "text" as const, text: formatToolResultText(questions, answers, cancelled) }],
+					details: {
+						answers,
+						cancelled,
+						error: result.source === "timeout" ? "timeout" : undefined,
+					},
+				};
+			}
+
+			// 4. Parent process: direct TUI fallback (used without a broker)
 			if (ctx.mode === "tui" && ctx.ui) {
 				const result = await runAskUserQuestionTUI(ctx, questions);
 				return {
@@ -146,7 +171,7 @@ export function createAskUserQuestionTool(): ToolDefinition {
 				};
 			}
 
-			// 4. Parent process: non-TUI fallback (sequential select/input if UI exists)
+			// 5. Parent process: non-TUI fallback (sequential select/input if UI exists)
 			if (ctx.hasUI && ctx.ui) {
 				const answers: TUIAnswer[] = [];
 				for (let i = 0; i < questions.length; i++) {
@@ -187,7 +212,7 @@ export function createAskUserQuestionTool(): ToolDefinition {
 				};
 			}
 
-			// 5. Parent process: headless fallback (use defaults)
+			// 6. Parent process: headless fallback (use defaults)
 			const answers: TUIAnswer[] = questions.map((q, i) => ({
 				questionIndex: i,
 				kind: "option",

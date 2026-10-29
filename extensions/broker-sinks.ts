@@ -17,6 +17,7 @@ import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { RequestBroker, PendingRequest, BrokerResult } from "./request-broker.ts";
 import { runAskUserQuestionTUI } from "./ask-user-question-tui.ts";
+import { installRelayHookSink } from "./relay-hook.ts";
 
 export interface BrokerSinkOptions {
 	pi: ExtensionAPI;
@@ -29,9 +30,11 @@ export interface BrokerSinkOptions {
  */
 export function installBrokerSinks(options: BrokerSinkOptions): void {
 	const { pi, broker } = options;
+	const relay = installRelayHookSink(pi, broker);
 
 	broker.onBatch((batch) => {
 		const human = batch.filter((r) => r.kind === "human");
+		relay.offer(human);
 		const supervisor = batch.filter((r) => r.kind === "supervisor");
 
 		if (human.length > 0) void handleHumanBatch(pi, broker, human);

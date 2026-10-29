@@ -992,7 +992,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool(createListWorkflowsTool());
 
 	// --- Ask Tools (User & Supervisor communication) ---
-	pi.registerTool(createAskUserQuestionTool());
+	pi.registerTool(createAskUserQuestionTool(globalBroker));
 	pi.registerTool(createAskSupervisorTool());
 	pi.registerTool(createNodeStateTool());
 

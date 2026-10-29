@@ -218,6 +218,11 @@ export class RequestBroker {
 		entry.resolve({ requestId, ...result });
 	}
 
+	/** Whether a request still awaits an answer (used by optional answer sinks). */
+	hasPending(requestId: string): boolean {
+		return this.pending.has(requestId);
+	}
+
 	/**
 	 * Marks a supervisor request as already delivered inline (embedded in the
 	 * subagent tool result). The broker sink will skip the redundant sendMessage

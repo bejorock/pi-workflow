@@ -11,6 +11,7 @@ import {
 	createAskUserQuestionTool,
 	createAskSupervisorTool,
 } from "../extensions/ask-tools.ts";
+import { RequestBroker } from "../extensions/request-broker.ts";
 import {
 	PI_WORKFLOW_CHANNEL_DIR_ENV,
 	PI_WORKFLOW_RUN_ID_ENV,
@@ -66,6 +67,35 @@ describe("Ask Tools in Parent Process (direct UI calling)", () => {
 		expect(custom).toHaveBeenCalled();
 		expect(res.details.answers).toEqual([{ questionIndex: 0, kind: "option", answer: "B" }]);
 		expect(res.details.cancelled).toBe(false);
+	});
+
+	it("ask_user_question routes a parent request through the supplied broker", async () => {
+		const broker = new RequestBroker({ coalesceMs: 0 });
+		broker.onBatch((requests) => {
+			expect(requests).toHaveLength(1);
+			expect(requests[0].kind).toBe("human");
+			broker.resolve(requests[0].id, {
+				source: "human",
+				text: "B",
+				answers: {
+					questions: [{ questionIndex: 0, kind: "option", answer: "B" }],
+					cancelled: false,
+				},
+			});
+		});
+		const tool = createAskUserQuestionTool(broker);
+		const result = tool.execute(
+			"call-parent-broker",
+			{ questions: [{ question: "Choose?", header: "H1", options: [{ label: "A" }, { label: "B" }] }] } as never,
+			undefined,
+			undefined,
+			{} as ExtensionToolContext,
+		);
+		broker.tick();
+
+		await expect(result).resolves.toMatchObject({
+			details: { answers: [{ questionIndex: 0, kind: "option", answer: "B" }], cancelled: false },
+		});
 	});
 
 	it("ask_user_question validation failure", async () => {
