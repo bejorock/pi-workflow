@@ -182,7 +182,13 @@ export function resolvePiLaunchToolPlan(input: ResolvePiLaunchToolPlanInput): Pi
 		PROMPT_RUNTIME_EXTENSION_PATH,
 		CURRENT_EXTENSION_PATH,
 	];
-	const disableAmbientExtensions = capabilityCeiling?.denyExtensions === true || input.extensions !== undefined;
+	// A subagent is not an interactive Herdr pane. Inheriting global UI/mobile
+	// hooks can leave a referenced socket/reconnect timer alive after the child
+	// settles, which prevents the JSON process from exiting and stalls its graph
+	// node forever. Always start children with --no-extensions, then explicitly
+	// add pi-workflow's runtime extension and only the extensions the agent
+	// declared in frontmatter.
+	const disableAmbientExtensions = true;
 	const configuredExtensions = capabilityCeiling?.denyExtensions ? [] : [...toolExtensionPaths, ...(input.extensions ?? []), ...(input.subagentOnlyExtensions ?? [])];
 	const extensionArgs = disableAmbientExtensions
 		? [...new Set([...runtimeExtensions, ...configuredExtensions])]

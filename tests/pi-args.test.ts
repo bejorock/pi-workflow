@@ -37,12 +37,14 @@ describe("pi-args", () => {
 	});
 
 	describe("resolvePiLaunchToolPlan", () => {
-		it("should handle no tools/extensions", () => {
+		it("isolates every child from ambient global extensions", () => {
 			const plan = resolvePiLaunchToolPlan({});
 			expect(plan.requestedBuiltinTools).toEqual([]);
 			expect(plan.declaredBuiltinTools).toEqual([]);
 			expect(plan.explicitToolAllowlist).toBe(false);
 			expect(plan.fanoutAuthorized).toBe(false);
+			expect(plan.disableAmbientExtensions).toBe(true);
+			expect(plan.extensionArgs.some((entry) => entry.endsWith("index.ts") || entry.endsWith("index.js"))).toBe(true);
 		});
 
 		it("should handle tools array", () => {
@@ -273,7 +275,7 @@ describe("pi-args", () => {
 			expect(result.args).toContain("--no-extensions");
 		});
 
-		it("should inject index.ts/index.js as a runtime extension", () => {
+		it("disables ambient hooks but injects pi-workflow runtime extensions", () => {
 			const result = buildPiArgs({
 				baseArgs: ["--mode", "json", "-p"],
 				task: "test",
@@ -281,10 +283,12 @@ describe("pi-args", () => {
 				inheritProjectContext: true,
 				inheritSkills: true,
 			});
+			expect(result.args).toContain("--no-extensions");
 			const indexExt = result.args.some(
 				(arg) => arg.endsWith("index.ts") || arg.endsWith("index.js"),
 			);
 			expect(indexExt).toBe(true);
+			expect(result.args).toContain("--extension");
 		});
 
 		it("should inject ask_user_question and ask_supervisor into REQUIRED_CHILD_TOOLS env", () => {
