@@ -1,21 +1,31 @@
 import { describe, expect, it, vi } from "vitest";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { deliverResultSummary, registerTaskPanel } from "../extensions/task-panel.ts";
 import { WorkflowManager } from "../extensions/workflow-manager.ts";
 import type { ManagedRun } from "../extensions/workflow-manager.ts";
 
 function fakeUi() {
 	const statuses = new Map<string, string | undefined>();
+	const notifications: Array<{ text: string; type?: string }> = [];
 	return {
 		ui: {
 			setStatus: (key: string, text: string | undefined) => statuses.set(key, text),
+			notify: (text: string, type?: string) => notifications.push({ text, type }),
 		} as never,
 		statuses,
+		notifications,
 		current: () => [...statuses.values()].filter(Boolean).join("\n"),
 	};
 }
 
 function fakePi() {
-	return { sendMessage: vi.fn().mockResolvedValue(undefined) } as never;
+	return {
+		sendMessage: vi.fn().mockResolvedValue(undefined),
+		events: { emit: vi.fn() },
+	} as unknown as ExtensionAPI & {
+		sendMessage: ReturnType<typeof vi.fn>;
+		events: { emit: ReturnType<typeof vi.fn> };
+	};
 }
 
 function startRun(manager: WorkflowManager, name = "tdd_feature"): void {
@@ -108,6 +118,49 @@ describe("task panel status line", () => {
 		manager.completeRun("r1", "done");
 
 		expect(current()).toBe("");
+	});
+
+	it("shows one human-only toast and relay notification on completion", () => {
+		const manager = new WorkflowManager();
+		const pi = fakePi();
+		const { ui, notifications } = fakeUi();
+		registerTaskPanel(pi, manager, ui);
+
+		startRun(manager);
+		runNode(manager, 1, "a", { tokens: 42 });
+		manager.completeRun("r1", "done");
+
+		expect(pi.sendMessage).not.toHaveBeenCalled();
+		expect(notifications).toHaveLength(1);
+		expect(notifications[0]).toMatchObject({ type: "info" });
+		expect(notifications[0].text).toContain('Workflow "tdd_feature" completed');
+		expect(pi.events.emit).toHaveBeenCalledWith(
+			"herdr-relay:publish",
+			expect.objectContaining({
+				namespace: "pi-workflow.dev",
+				name: "workflow_completed",
+				payload: expect.objectContaining({ runId: "r1", tokens: 42 }),
+			}),
+		);
+	});
+
+	it("replaces prior listeners when registered again after a session reload", () => {
+		const manager = new WorkflowManager();
+		const first = fakePi();
+		const second = fakePi();
+		const firstUi = fakeUi();
+		const secondUi = fakeUi();
+		registerTaskPanel(first, manager, firstUi.ui);
+		registerTaskPanel(second, manager, secondUi.ui);
+
+		startRun(manager);
+		runNode(manager, 1, "a");
+		manager.completeRun("r1", "done");
+
+		expect(first.sendMessage).not.toHaveBeenCalled();
+		expect(firstUi.notifications).toHaveLength(0);
+		expect(secondUi.notifications).toHaveLength(1);
+		expect(second.events.emit).toHaveBeenCalledTimes(1);
 	});
 });
 

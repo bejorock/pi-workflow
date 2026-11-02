@@ -327,7 +327,9 @@ export async function executeGraphRun(options: GraphRunOptions): Promise<GraphRu
 		durationMs: result.durationMs,
 		error: result.error,
 	});
-	display?.runCompleted(result);
+	// The detached graph-tool caller stages this rendered report before it
+	// completes the display run. Completing here would emit a manager `complete`
+	// event before the report exists, then emit it again after staging.
 	options.onRunComplete?.(result);
 
 	// Only persist a graph that actually worked: saving a broken one
@@ -371,7 +373,15 @@ export async function executeGraphRun(options: GraphRunOptions): Promise<GraphRu
 	}
 
 	for (const warning of summary.warnings) {
-		lines.push(`\n⚠ ${warning.message}`);
+		const finalBudget = summary.budget;
+		if (finalBudget.total !== null && finalBudget.spent !== warning.spent) {
+			lines.push(
+				`\n⚠ ${warning.message}\n` +
+					`Final token usage: ${finalBudget.spent}/${finalBudget.total} tokens.`,
+			);
+		} else {
+			lines.push(`\n⚠ ${warning.message}`);
+		}
 	}
 	if (summary.worktreeSkipped) {
 		lines.push(`\nNote: ${summary.worktreeSkipped}`);

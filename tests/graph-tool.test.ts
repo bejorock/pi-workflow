@@ -337,6 +337,7 @@ g.run();
 			const result = await run(LINEAR, { args: { task: "t" }, tokenBudget: 1000 }, spawn);
 
 			expect(result.text).toMatch(/Token budget/);
+			expect(result.text).toContain("Final token usage: 1800/1000 tokens.");
 			// Tracked, not enforced: both nodes still ran.
 			expect(spawn).toHaveBeenCalledTimes(2);
 			expect(result.text).toContain("completed");

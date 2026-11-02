@@ -2,7 +2,7 @@
  * Background-run UX task panel:
  *  - Displays a live status bar under the chat input while dynamic workflows run.
  *  - Automatically updates as agents start, complete, or report progress.
- *  - Delivers a human-readable summary back to the conversation when background runs finish.
+ *  - Shows a human-only completion toast and optional relay notification when background runs finish.
  */
 
 import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
@@ -13,8 +13,20 @@ export interface TaskPanelOptions {
 	cwd?: string;
 }
 
+interface TaskPanelHolder {
+	cleanup?: () => void;
+}
+
+function holderOf(manager: WorkflowManager): TaskPanelHolder {
+	return manager as unknown as TaskPanelHolder;
+}
+
 /**
  * Register background task panel listeners and status line updates.
+ *
+ * The workflow manager survives Pi reload/session replacement, while a TUI
+ * context does not. Replace the old listeners before installing this
+ * generation's listeners so a completed run has one compact panel notice.
  */
 export function registerTaskPanel(
 	pi: ExtensionAPI,
@@ -22,6 +34,9 @@ export function registerTaskPanel(
 	ui: ExtensionUIContext,
 	_opts: TaskPanelOptions = {},
 ): () => void {
+	const holder = holderOf(manager);
+	holder.cleanup?.();
+
 	const activeKeys = new Set<string>();
 
 	const updateStatus = (runId: string) => {
@@ -68,12 +83,28 @@ export function registerTaskPanel(
 		const run = manager.getRun(e.runId);
 		if (!run) return;
 
-		const text = deliverResultSummary(run, e.error);
-		void pi.sendMessage({
-			customType: "workflows",
-			content: text,
-			display: true,
-		});
+		const failed = Boolean(e.error) || run.status !== "completed";
+		const text = deliverResultSummary(run, failed ? (e.error ?? "workflow stopped") : undefined);
+		ui.notify(text, failed ? "error" : "info");
+
+		// The relay hook is optional. This namespaced, bounded notification is
+		// for a future mobile client and never creates transcript/LLM context.
+		try {
+			pi.events.emit("herdr-relay:publish", {
+				namespace: "pi-workflow.dev",
+				name: failed ? "workflow_failed" : "workflow_completed",
+				payload: {
+					runId: e.runId,
+					name: run.snapshot.meta.name || "workflow",
+					status: failed ? run.status : "completed",
+					steps: run.snapshot.agents.length,
+					tokens: run.snapshot.totalTokens,
+					durationMs: run.snapshot.durationMs,
+				},
+			});
+		} catch {
+			// No relay hook / stale extension must not affect workflow reporting.
+		}
 	};
 
 	const events = ["agentStart", "agentEnd", "phase", "log", "paused", "resumed"];
@@ -87,7 +118,7 @@ export function registerTaskPanel(
 	manager.on("error", onComplete);
 	manager.on("stopped", onComplete);
 
-	return () => {
+	const cleanup = () => {
 		for (const ev of events) {
 			manager.off(ev, onRunEvent);
 		}
@@ -99,7 +130,10 @@ export function registerTaskPanel(
 			ui.setStatus(key, undefined);
 		}
 		activeKeys.clear();
+		if (holder.cleanup === cleanup) holder.cleanup = undefined;
 	};
+	holder.cleanup = cleanup;
+	return cleanup;
 }
 
 /**
