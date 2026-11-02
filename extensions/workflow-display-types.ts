@@ -34,6 +34,10 @@ export type AgentStatus = "queued" | "running" | "done" | "error" | "skipped" | 
 export interface WorkflowAgentSnapshot {
 	/** Sequential agent ID */
 	id: number;
+	/** Stable graph identity and observed route, when this entry is a node visit. */
+	nodeId?: string;
+	nodeType?: string;
+	routedTo?: string;
 	/** Display label for this agent */
 	label: string;
 	/** Phase this agent belongs to */

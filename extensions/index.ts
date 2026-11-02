@@ -51,6 +51,7 @@ import { TechnicalFailureError, type FailureClassification } from "./failure-cla
 import { WorkflowManager } from "./workflow-manager.ts";
 import { openWorkflowNavigator } from "./workflow-ui.ts";
 import { registerTaskPanel } from "./task-panel.ts";
+import { registerWorkspaceDashboard } from "./workspace-dashboard.ts";
 import { registerWorkflowMode } from "./workflow-mode.ts";
 import { registerBlankStopGuard } from "./blank-stop-guard.ts";
 import { registerBashTimeoutGuard } from "./bash-timeout-guard.ts";
@@ -596,7 +597,7 @@ export default function (pi: ExtensionAPI) {
 					name: "subagent (parallel)",
 					description: `${params.tasks.length} tasks`,
 					phases: [{ title: "execution" }],
-				});
+				}, undefined, { cwd: ctx.cwd });
 
 				const liveResults: Array<{ agent: string; task: string; status: "running" | "done" | "error"; line?: string }> =
 					params.tasks.map((t) => ({ agent: t.agent, task: t.task, status: "running" }));
@@ -801,7 +802,7 @@ export default function (pi: ExtensionAPI) {
 					name: `subagent: ${agent.name}`,
 					description: params.task,
 					phases: [{ title: "execution" }],
-				});
+				}, undefined, { cwd: ctx.cwd });
 
 				const sessionDir = path.join(ctx.cwd, ".pi-workflow", "sessions", runId);
 				fs.mkdirSync(sessionDir, { recursive: true });
@@ -1289,6 +1290,7 @@ export default function (pi: ExtensionAPI) {
 	};
 
 	// --- Commands ---
+	registerWorkspaceDashboard(pi, globalWorkflowManager);
 	pi.registerCommand("workflows", {
 		description: "Open the interactive /workflows navigator overlay",
 		handler: async (_args, ctx) => {

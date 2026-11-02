@@ -409,6 +409,20 @@ export function createGraphWorkflowTool(options: GraphToolOptions = {}): ToolDef
 					})
 				: undefined;
 
+			const managed = options.workflowManager?.getRun(runId);
+			if (managed) {
+				managed.cwd = cwd;
+				const directEdges = [...graph.edges.values()].flat().flatMap(e =>
+					e.type === "direct" ? [{ from: e.from, to: typeof e.to === "string" ? e.to : "END" }] : []);
+				managed.dashboardGraph = {
+					nodes: [
+						...[...graph.nodes.values()].map(n => ({ id: n.id, label: n.id, nodeType: n.def.type })),
+						...(directEdges.some(e => e.to === "END") ? [{ id: "END", label: "END", nodeType: "end" }] : []),
+					],
+					edges: directEdges,
+				};
+			}
+
 			options.onRunStart?.({ runId, name: meta.name, nodeIds });
 
 			const forkContext: ForkContextOptions | undefined = ctx.model

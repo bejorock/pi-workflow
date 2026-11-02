@@ -39,6 +39,11 @@ export interface ManagedRun {
 	 */
 	script?: string;
 	cwd?: string;
+	/** Declarative display data only; never serialized executable graph closures. */
+	dashboardGraph?: {
+		nodes: { id: string; label: string; nodeType: string }[];
+		edges: { from: string; to: string }[];
+	};
 }
 
 export interface PersistedRun {

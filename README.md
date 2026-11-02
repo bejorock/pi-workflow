@@ -860,11 +860,47 @@ without being forced to read them.
 | Command | Purpose |
 |---|---|
 | `/workflows` | Interactive TUI navigator: runs → phases → nodes → detail |
+| `/workspace-dashboard` | Optional Kitty graphics viewer in a new Herdr tab: workflows, plans, contracts |
 | `/plans` | Interactive TUI navigator: browse and read plans in `.pi-workflow/plans/` |
 | `/contracts` | Interactive TUI navigator: browse contracts with type/status colour coding |
 | `/wf normal\|plan\|workflow` | Switch execution mode (Normal, Plan, or Workflow) |
 | `/agents` | Show the discovered agent roster |
 | `/saved-workflows` | List or delete saved workflow scripts |
+
+### Optional graphical workspace dashboard
+
+Run **`/workspace-dashboard`** explicitly from an interactive Pi session inside a Herdr pane.
+It opens a new **Herdr tab** with three read-only sections:
+
+- **Workflows:** actual execution state, smooth Kitty PNG graphics, directed edges, active-node pulses,
+  observed-route animation, visit counts, token/time metrics, and node previews.
+- **Plans:** searchable titles and rendered Markdown with headings, lists, tables, checkboxes, and highlighted code.
+- **Contracts:** the same document reader, with type/status and producer/consumer metadata separated from frontmatter.
+
+**Requirements:** Linux/macOS, a Herdr server supporting `layout.apply` with argv-backed panes,
+Node (already used by Pi), and a terminal/Herdr client path that acknowledges Kitty graphics.
+The viewer probes support inside its own PTY. Unsupported paths show an explanation; there is no silent
+text-only fallback. No additional packages or shell configuration are required. A particular shell is
+not required: Herdr launches Node directly, without shell command interpolation.
+
+**Controls:** `1`/`2`/`3` or click tabs; up/down select an item; left/right select a workflow node;
+click graph nodes for details; `/` filters item titles; PgUp/PgDn or wheel scroll documents;
+`f` searches document text, Enter finds a match, `n` finds the next; `q` closes the viewer.
+Use a terminal of at least **86 columns × 28 rows** (larger is better).
+
+The hybrid renderer uses pixel graphics for the graph and terminal text for documents and controls.
+It does not render HTML, fetch remote images, execute Markdown code, or open links automatically.
+The diagram shows declared **direct** edges and **observed** conditional routes, not speculative routes.
+Historical journals only supply routes actually recorded; an incomplete historical journal is marked
+unknown, not falsely running/completed. Long graphs currently fit the available canvas rather than
+providing pan/zoom.
+
+The viewer reads an atomic snapshot in a private temporary directory, refreshed once per second.
+It never controls workflows, modifies documents, sends model messages, or connects to the mobile relay.
+Closing its tab does **not** stop workflows. On Pi shutdown/reload the viewer retains its last snapshot,
+marks itself disconnected, and stops animating active work; reopen with the command after reload.
+Temporary snapshot cleanup is best-effort after shutdown (OS temporary-directory cleanup applies if Pi exits immediately). Multiple opens share one session publisher.
+The existing `/workflows`, `/plans`, and `/contracts` interfaces are unchanged and remain available everywhere.
 
 `/workflows` shows the walk with routing inline, so an escalation loop is legible at a glance:
 

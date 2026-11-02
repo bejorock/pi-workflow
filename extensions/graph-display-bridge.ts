@@ -170,6 +170,8 @@ export class GraphDisplayBridge {
 		try {
 			this.manager.markAgentStart(this.runId, 0, {
 				id,
+				nodeId: info.nodeId,
+				nodeType: info.nodeType,
 				label,
 				prompt: `${info.nodeType} node "${info.nodeId}"`,
 				status: "running",
@@ -221,6 +223,8 @@ export class GraphDisplayBridge {
 		const preview = route ? `${route}  ${body}` : body;
 
 		try {
+			const agent = this.manager.getRun(this.runId)?.snapshot.agents.find(a => a.id === id);
+			if (agent) agent.routedTo = execution.routedTo;
 			this.manager.markAgentEnd(
 				this.runId,
 				id,
