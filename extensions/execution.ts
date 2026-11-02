@@ -95,6 +95,22 @@ import { EventEmitter } from "node:events";
 const artifactOutputByResult = new WeakMap<SingleResult, string>();
 const acceptanceOutputByResult = new WeakMap<SingleResult, string>();
 
+/** Herdr identity belongs to the interactive parent pane, never a headless child Pi session. */
+export const HERDR_CHILD_IDENTITY_ENV_KEYS = [
+	"HERDR_ENV",
+	"HERDR_PANE_ID",
+	"HERDR_TAB_ID",
+	"HERDR_WORKSPACE_ID",
+	"HERDR_SESSION",
+] as const;
+
+/** Clone an environment without parent Herdr pane identity for a spawned child. */
+export function stripHerdrPaneIdentity(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+	const childEnv = { ...env };
+	for (const key of HERDR_CHILD_IDENTITY_ENV_KEYS) delete childEnv[key];
+	return childEnv;
+}
+
 function emptyUsage(): Usage {
 	return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 };
 }
@@ -349,13 +365,17 @@ async function runSingleAttempt(
 		return result;
 	}
 
-	const spawnEnv = {
+	const spawnEnv = stripHerdrPaneIdentity({
 		...process.env,
 		...sharedEnv,
 		...getSubagentDepthEnv(options.maxSubagentDepth),
 		...(shared.forkParentSessionFile ? { PI_FORK_PARENT_SESSION_FILE: shared.forkParentSessionFile } : {}),
 		...(options.extraEnv ?? {}),
-	};
+	});
+	// A child Pi process has its own session file, not an independently managed
+	// Herdr pane. Do not let global Herdr/mobile hooks bind that child session
+	// to the parent's pane: a rejected binding can leave a reconnect timer alive
+	// forever after the child settles. Ambient provider extensions stay enabled.
 
 	// Intercom events for conditional detach-on-ask.
 	// When a child calls ask_supervisor (expectsReply: true), the parent's

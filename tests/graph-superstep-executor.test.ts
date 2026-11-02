@@ -279,6 +279,27 @@ describe("runSuperstepGraph: mixed outcomes and failures", () => {
 		expect(result.state).toMatchObject({ a: "a", b: "b", c: "c" });
 	});
 
+	it("aborts rather than reports success when a selected shared report waits on a skipped fan-in predecessor", async () => {
+		const graph = buildGraphFromScript(`export const meta = { name: "skipped_fanin", description: "repro" };
+const g = graph();
+g.node("scan", agent("scout", () => "scan"));
+g.node("review", agent("reviewer", () => "review"));
+g.node("report", () => "report");
+g.edge("scan", (_s, result) => result === "failed" ? "report" : "review");
+g.edge("review", "report");
+g.edge("report", END);
+g.run({});`).graph;
+
+		const result = await runSuperstepGraph(graph, {
+			runId: "r1",
+			runNode: scriptedRunner({ scan: "failed", review: "review", report: "report" }),
+		});
+
+		expect(result.status).toBe("aborted");
+		expect(result.error).toContain("selected nodes still waiting on skipped predecessors: report");
+		expect(result.path).toEqual(["scan"]);
+	});
+
 	it("a technical failure aborts the whole run", async () => {
 		const result = await runSuperstepGraph(diamondGraph(), {
 			runId: "r1",

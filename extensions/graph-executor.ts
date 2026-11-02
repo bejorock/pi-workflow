@@ -863,6 +863,18 @@ export async function runSuperstepGraph(
 			graph.entry,
 		);
 
+		// An empty frontier is successful only when every selected node either
+		// executed or deliberately reached END. If a selected node still has
+		// unresolved claims from a branch that was never routed to, this is a
+		// conditional fan-in deadlock — never report it as a completed workflow.
+		if (frontier.size === 0 && (!resume || resume.remainingClaimsBySource !== undefined)) {
+			const stranded = [...selected].filter((nodeId) => !executed.has(nodeId));
+			if (stranded.length > 0) {
+				status = "aborted";
+				error = `Graph reached an empty frontier with selected nodes still waiting on skipped predecessors: ${stranded.join(", ")}. Use separate terminal report nodes or remove the unintended fan-in.`;
+			}
+		}
+
 		options.onRoundComplete?.({
 			round,
 			nodeIds: roundNodeIds,
