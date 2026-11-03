@@ -11,7 +11,7 @@
  * branch on.
  */
 
-import { spawnSync } from "node:child_process";
+import { runCommandProcess } from "./command-process.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { AgentConfig } from "./agents.ts";
@@ -368,7 +368,7 @@ export function createNodeRunner(options: CreateNodeRunnerOptions): NodeRunner {
 			}
 
 			case "command":
-				return runCommandNode(node.id, node.def, state, options.cwd);
+				return runCommandNode(node.id, node.def, state, options.cwd, signal);
 
 			case "agent":
 				return runAgentNode(node, node.def.agentName, node.def.promptFn(state), signal);
@@ -495,6 +495,7 @@ export function createNodeRunner(options: CreateNodeRunnerOptions): NodeRunner {
 		def: CommandNodeDef,
 		state: GraphState,
 		defaultCwd: string,
+		signal?: AbortSignal,
 	): Promise<NodeRunOutcome> {
 		const timeout = def.timeoutMs ?? COMMAND_NODE_DEFAULT_TIMEOUT_MS;
 		const cwd = def.cwd ?? defaultCwd;
@@ -537,25 +538,24 @@ export function createNodeRunner(options: CreateNodeRunnerOptions): NodeRunner {
 			commandString = def.command;
 		}
 
-		// spawnSync does NOT throw for ENOENT, a bad cwd, a timeout, or an
-		// overflowed maxBuffer — all of those land in result.error with
-		// status/signal null. try/catch alone would never see them; result.error
-		// must be checked explicitly, which is what distinguishes "infrastructure
-		// could not even run the command" from "the command ran and exited
-		// nonzero" below.
-		const spawnResult = spawnSync(commandString, {
-			cwd,
-			env,
-			timeout,
-			shell: true,
-			encoding: "utf-8",
-			maxBuffer: COMMAND_NODE_MAX_OUTPUT_BYTES,
+		// Await asynchronous child I/O so Pi input, dashboard heartbeats, and
+		// other nodes in the same parallel wave remain responsive.
+		const spawnResult = await runCommandProcess(commandString, {
+			cwd, env, timeout, signal, maxBuffer: COMMAND_NODE_MAX_OUTPUT_BYTES,
 		});
 
 		const timedOut = spawnResult.error !== undefined && (spawnResult.error as NodeJS.ErrnoException).code === "ETIMEDOUT";
-		const stdout = truncateOutput(spawnResult.stdout ?? "");
-		const stderr = truncateOutput(spawnResult.stderr ?? "");
+		const stdout = truncateOutput(spawnResult.stdout.toString("utf8"));
+		const stderr = truncateOutput(spawnResult.stderr.toString("utf8"));
 		const text = stdout.trim() || stderr.trim() || "";
+
+		if (spawnResult.aborted) {
+			return {
+				result: withResultText({ status: "blocked", text, data: { exitCode: null, stdout, stderr, cancelled: true } }),
+				technicalFailure: true,
+				error: `command node "${nodeId}" cancelled`,
+			};
+		}
 
 		if (timedOut) {
 			// allowFailure makes this routable instead of aborting the run, so its

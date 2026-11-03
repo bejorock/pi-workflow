@@ -139,7 +139,8 @@ g.node('check',    (state) => plan.get('sprint-plan').ok ? 'found' : 'missing');
 ```
 
 **Command nodes — a shell command, no LLM.** `command(cmdString, options)` runs a real
-shell command synchronously, with no agent involved. Use it for deterministic, mechanical checks
+shell command with no agent involved. The graph awaits its result, but execution is asynchronous
+so Pi input, live dashboards, and parallel command nodes remain responsive. Use it for deterministic, mechanical checks
 that don't need judgement — `npm test`, a linter, a build step:
 
 ```js

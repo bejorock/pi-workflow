@@ -135,7 +135,7 @@ describe("GraphBuilder command node", () => {
 	});
 });
 
-// ── createNodeRunner: command nodes (real spawnSync execution) ──────────────
+// ── createNodeRunner: command nodes (real asynchronous execution) ───────────
 
 describe("createNodeRunner: command nodes", () => {
 	const cwd = process.cwd();
@@ -149,6 +149,70 @@ describe("createNodeRunner: command nodes", () => {
 	function commandNode(id: string, def: CommandNodeDef) {
 		return { id, def };
 	}
+
+	it("keeps timers and live dashboard snapshots responsive while a command runs", async () => {
+		const { WorkflowManager } = await import("../extensions/workflow-manager.ts");
+		const { DashboardProjector } = await import("../extensions/dashboard-state.ts");
+		const manager = new WorkflowManager();
+		manager.registerRun("live", { name: "live" }, undefined, { cwd });
+		const projector = new DashboardProjector(manager, cwd);
+		let finished = false;
+		const pending = runnerWith()(commandNode("test", command("sleep 0.3")), {}, { step: 1, runId: "r1" })
+			.then(result => { finished = true; return result; });
+		const whileRunning = await new Promise<boolean>(resolve => setTimeout(() => {
+			resolve(!finished && projector.snapshot().runs.some(r => r.runId === "live" && r.status === "running"));
+		}, 25));
+		await pending;
+		expect(whileRunning).toBe(true);
+	});
+
+	it("overlaps concurrent command nodes instead of blocking each spawn", async () => {
+		let finished = 0;
+		const runner = runnerWith();
+		const first = runner(commandNode("first", command("sleep 0.25")), {}, { step: 1, runId: "r1" })
+			.then(result => { finished++; return result; });
+		const second = runner(commandNode("second", command("sleep 0.25")), {}, { step: 2, runId: "r1" })
+			.then(result => { finished++; return result; });
+		const inFlight = await new Promise<number>(resolve => setTimeout(() => resolve(finished), 25));
+		await Promise.all([first, second]);
+		expect(inFlight).toBe(0);
+	});
+
+	it("cancels running commands promptly even with allowFailure", async () => {
+		const controller = new AbortController();
+		const started = Date.now();
+		const pending = runnerWith()(commandNode("test", command("sleep 10", { allowFailure: true })), {},
+			{ step: 1, runId: "r1", signal: controller.signal });
+		setTimeout(() => controller.abort(), 25);
+		const result = await pending;
+		expect(Date.now() - started).toBeLessThan(2000);
+		expect(result.technicalFailure).toBe(true);
+		expect(result.error).toContain("cancelled");
+	});
+
+	it("does not spawn a command when already cancelled", async () => {
+		const controller = new AbortController(); controller.abort();
+		const outcome = await runnerWith()(commandNode("test", command("sleep 10")), {},
+			{ step: 1, runId: "r1", signal: controller.signal });
+		expect(outcome.error).toContain("cancelled");
+	});
+
+	it("reports bad cwd and output overflow as technical failures", async () => {
+		for (const def of [command("echo hello", { cwd: "/nonexistent-pi-workflow-dir" }), command("yes x | head -c 100000", { allowFailure: true })]) {
+			const outcome = await runnerWith()(commandNode("test", def), {}, { step: 1, runId: "r1" });
+			expect(outcome.technicalFailure).toBe(true);
+			expect(outcome.error).toContain("failed to run");
+		}
+	});
+
+	it("kills shell descendants on timeout rather than leaving their pipes open", async () => {
+		if (process.platform === "win32") return;
+		const started = Date.now();
+		const outcome = await runnerWith()(commandNode("test", command("sleep 10 & child=$!; echo $child; wait", { timeoutMs: 50 })), {}, { step: 1, runId: "r1" });
+		expect(Date.now() - started).toBeLessThan(2000);
+		expect(outcome.technicalFailure).toBe(true);
+		expect(outcome.error).toContain("timed out");
+	});
 
 	it("runs a real command and captures exit code 0 as status ok", async () => {
 		const runner = runnerWith();
@@ -386,6 +450,37 @@ describe("createNodeRunner: command nodes", () => {
 // ── Full executor walk ────────────────────────────────────────────────────────
 
 describe("command node in full graph walk", () => {
+	it("publishes real parallel running nodes before the fan-in completes", async () => {
+		const { WorkflowManager } = await import("../extensions/workflow-manager.ts");
+		const { GraphDisplayBridge } = await import("../extensions/graph-display-bridge.ts");
+		const { DashboardProjector } = await import("../extensions/dashboard-state.ts");
+		const cwd = process.cwd();
+		const manager = new WorkflowManager();
+		const display = new GraphDisplayBridge({ manager, runId: "responsive-wave", name: "responsive-wave", description: "", cwd, script: "test" });
+		const projector = new DashboardProjector(manager, cwd);
+		const g = createGraphFactory().graph();
+		g.node("start", command("printf ready"));
+		g.node("a", command("sleep 0.35"));
+		g.node("b", command("sleep 0.35"));
+		g.node("join", command("printf joined"));
+		g.edge("start", "a"); g.edge("start", "b");
+		g.edge("a", "join"); g.edge("b", "join"); g.edge("join", END); g.run({});
+		const samples: string[][] = [];
+		const timer = setInterval(() => {
+			const run = projector.snapshot().runs.find(r => r.runId === "responsive-wave");
+			samples.push(run?.nodes.filter(n => n.status === "running").map(n => n.id) ?? []);
+		}, 20);
+		try {
+			const result = await runSuperstepGraph(g.build(), {
+				runId: "responsive-wave",
+				runNode: createNodeRunner({ cwd, runId: "responsive-wave", spawnAgent: (async () => ({})) as never }),
+				onNodeStart: info => display.nodeStarted(info),
+				onNodeComplete: execution => display.nodeCompleted(execution),
+			});
+			expect(result.status).toBe("completed");
+			expect(samples.some(ids => ids.includes("a") && ids.includes("b"))).toBe(true);
+		} finally { clearInterval(timer); }
+	});
 	it("worker → test: agent receives the command's output as state", async () => {
 		const { graph: graphFn } = createGraphFactory();
 		const g = graphFn();

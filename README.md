@@ -203,9 +203,11 @@ g.node('check', (state) => plan.get('sprint-plan').ok ? 'found' : 'missing');
 g.node('label', (state) => `processing task: ${state.planner}`);
 ```
 
-**Command nodes** run a real shell command synchronously — no LLM, no subprocess spawned by an
-agent, just the command itself. Use them for deterministic checks that don't need judgement:
-`npm test`, a linter, a build step.
+**Command nodes** run a real shell command — no LLM or agent wrapper, just the command itself.
+The graph waits for its result, but subprocess execution is asynchronous: Pi stays interactive,
+the dashboard refreshes live, and commands in a parallel wave overlap. Timeout or cancellation
+terminates the command's process group on Linux/macOS. Use command nodes for deterministic checks
+that don't need judgement: `npm test`, a linter, a build step.
 
 ```js
 g.node('worker', agent('worker', (s) => 'implement the feature'));
