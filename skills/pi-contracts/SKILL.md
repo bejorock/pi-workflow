@@ -195,6 +195,25 @@ contract(action: "propose", id: "auth-api-v2")
 
 ---
 
+## Asking the Human About a Contract
+
+Keep the specification and trade-offs **in the contract**, not in a question dialog.
+`ask_user_question` and workflow `human()` enforce: question/expanded prompt **240 characters**,
+tab header **12**, option label **60** (prefer 1–5 words), and option description **160**.
+Overlong text is rejected, not silently shortened. Contract contents and Markdown previews are not
+subject to these question-text caps; neither are user answers or `ask_supervisor` coordination.
+
+For a workflow review gate, show the contract as an artifact instead of interpolating the full spec:
+
+```js
+g.node('review_spec', human('Accept the proposed contract?', {
+  options: ['accept', 'revise'], default: 'revise', artifacts: ['contract']
+}));
+```
+
+This human decision does not replace the contract lifecycle: the producer must still call `propose`
+when the draft is final, and consumers must check its status. See `pi-workflow` → **Human-facing text limits**.
+
 ## /contracts Command
 
 Type `/contracts` in the TUI to open the interactive navigator:

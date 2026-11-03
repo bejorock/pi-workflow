@@ -69,6 +69,25 @@ Replace the legacy session cookie approach with JWT tokens.
 
 The id is auto-derived from the name as a URL slug (e.g. `"Refactor Auth"` → `refactor-auth`). If a collision occurs, a timestamp suffix is added. Always use `list` to get the exact id before calling `get`/`edit`/`delete`.
 
+## Asking the Human About a Plan
+
+Keep detailed rationale, findings, and alternatives **in the plan**, not in a question dialog.
+`ask_user_question` and workflow `human()` enforce: question/expanded prompt **240 characters**,
+tab header **12**, option label **60** (prefer 1–5 words), and option description **160**.
+Overlong text is rejected, not silently shortened. Document contents and Markdown previews are not
+subject to these question-text caps; neither are user answers or `ask_supervisor` coordination.
+
+For a workflow review gate, show the plan as an artifact instead of interpolating its contents:
+
+```js
+g.node('approve', human('Approve the implementation plan?', {
+  options: ['approve', 'revise'], default: 'revise', artifacts: ['plan']
+}));
+```
+
+For an in-flight question, use a short topic header and concise options, and put any lengthy comparison
+in an option's `preview`. See `pi-workflow` → **Human-facing text limits** for the full rules.
+
 ## /plans Command
 
 Type `/plans` in the TUI to open the interactive plan navigator — browse all plans, read content,

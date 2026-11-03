@@ -219,10 +219,44 @@ loop never resolves.
 
 ### Human-facing text limits
 
-Keep `human()` prompts (including expanded state interpolation) and `ask_user_question` questions at most
-**240 characters**, tab headers **12**, option labels **60** (prefer 1–5 words), and option descriptions
-**160**. Overlong inputs are rejected rather than truncated. Put long context in option previews or plan/contract
-artifacts, not the question or label. These limits do not apply to `ask_supervisor` or user answers.
+These are enforced limits for **parent and child agents**, not just style suggestions:
+
+| Field | Maximum characters |
+|---|---:|
+| `ask_user_question.questions[].question` | 240 |
+| `human()` prompt, **after interpolation/function evaluation** | 240 |
+| `ask_user_question.questions[].header` | 12 |
+| Option `label` / each `human()` option string | 60 (prefer 1–5 words) |
+| Option `description` | 160 |
+
+Overlong inputs are **rejected, not truncated**. Shorten and resubmit; never assume the user saw an
+invalid question. Preserve option labels/defaults used by routing. Generated `human()` tab headers are
+shortened automatically without changing the full node ID. Counts use Unicode code points.
+
+**Before asking:** put explanations/research in an option's Markdown `preview` or a plan/contract,
+then ask one short decision question. Do not embed whole agent replies using `#{nodeId}` or
+`${s.nodeId}` in human prompts: the expanded text can exceed 240 characters and abort the node.
+Use `artifacts: ['plan', 'contract']` on `human()` to show those documents alongside the decision.
+
+```js
+g.node('approve', human('Approve the implementation plan?', {
+  options: ['approve', 'revise'], default: 'revise', artifacts: ['plan']
+}));
+```
+
+```js
+ask_user_question({ questions: [{
+  header: 'Storage', question: 'Which storage approach should we use?',
+  options: [
+    { label: 'SQLite', description: 'Simple local deployment; one writer.' },
+    { label: 'PostgreSQL', description: 'Concurrent writers; requires a database service.' }
+  ]
+}] });
+```
+
+The 12-character header follows Claude's documented format; the other hard character caps are
+pi-workflow policy. These limits **do not apply** to Markdown previews, document contents,
+user-written answers, or `ask_supervisor` coordination.
 
 ### Interactive Gates vs. In-Flight Tools
 
@@ -805,9 +839,9 @@ Uses `human` so the user gets to read the research and decide the implementation
 export const meta = { name: 'investigate_fix', description: 'Research then decide approach' };
 const g = graph();
 g.node('scout',      agent('scout',      (s) => `Find all files related to: ${args.task}`));
-g.node('researcher', agent('researcher', (s) => `Analyze this area of code:\n${s.scout}\nQuestion: ${args.task}`));
-// The #{nodeId} syntax is required for human prompts
-g.node('decide',     human(`Based on the research, should we refactor or patch?\n\nResearch:\n#{researcher}`, { options: ['refactor', 'patch'], default: 'patch' }));
+g.node('researcher', agent('researcher', (s) => `Analyze this area of code:\n${s.scout}\nQuestion: ${args.task}\nSave detailed findings with the plan tool for human review.`));
+// Have the researcher save detailed findings to a plan; keep the question short.
+g.node('decide',     human('Based on the research plan, should we refactor or patch?', { options: ['refactor', 'patch'], default: 'patch', artifacts: ['plan'] }));
 g.node('worker',     agent('worker',     (s) => `${s.decide}\n\nContext:\n${s.researcher}`));
 
 g.edge('scout', 'researcher');
@@ -824,10 +858,11 @@ Pauses the workflow to ask the human user for a decision using `human()`.
 export const meta = { name: 'guarded_deploy', description: 'Implement with human approval gate' };
 const g = graph();
 g.node('worker',   agent('worker',   (s) => `Implement: ${args.task}`));
-g.node('reviewer', agent('reviewer', (s) => `Review:\n${s.worker}`));
-g.node('approve',  human('Reviewer says:\n#{reviewer}\n\nApprove for merge?', {
+g.node('reviewer', agent('reviewer', (s) => `Review:\n${s.worker}\nSave review findings with the plan tool for human review.`));
+g.node('approve',  human('Approve for merge after reading the review plan?', {
   options: ['yes', 'no', 'revise'],
-  default: 'yes'
+  default: 'yes',
+  artifacts: ['plan']
 }));
 g.node('revise',   agent('worker',   (s) => `Address review feedback:\n${s.reviewer}`));
 
