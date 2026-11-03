@@ -13,7 +13,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 // @ts-ignore
 import { renderGraphPng, layoutGraph, kittyUpload, kittyDelete, isActiveStatus, probeReplyPattern, graphGeometry } from "../extensions/dashboard/graphics.mjs";
 // @ts-ignore
-import { draw, createViewState, decodeInput, stale, filtered } from "../extensions/dashboard/viewer.mjs";
+import { draw, createViewState, decodeInput, stale, filtered, FramePresenter } from "../extensions/dashboard/viewer.mjs";
 // @ts-ignore
 import { renderMarkdown, safeText, visibleWidth } from "../extensions/dashboard/markdown.mjs";
 
@@ -134,6 +134,37 @@ describe("standalone terminal rendering",()=>{
   const partial=decodeInput("\x1b[<0;10;");expect(partial.events).toEqual([]);
   expect(decodeInput(partial.rest+"5M").events[0]).toMatchObject({mouse:true,x:9,y:4});
   expect(decodeInput("\x1b_Gi=1;OK\x1b\\q").events).toEqual([{key:"q"}]);
+ });
+ it("does not repaint static documents or clear rows before rewriting them",()=>{
+  const snapshot={version:1,cwd:"/tmp",connected:true,updatedAt:Date.now(),runs:[],plans:[{id:"p",name:"Plan",content:"# Heading\n\nSome text"}],contracts:[]};
+  const state=createViewState();state.tab=1;
+  const presenter=new FramePresenter(100);
+  const first=draw(snapshot,state,110,34,0);
+  expect(first.rows.every((line:string)=>visibleWidth(line)===110)).toBe(true);
+  const output=presenter.present(first);
+  expect(output).toContain("\x1b[?2026h");expect(output.endsWith("\x1b[?2026l")).toBe(true);
+  expect(output).not.toContain("\x1b[2J");
+  expect(presenter.present(draw(snapshot,state,110,34,1))).toBe("");
+  state.editing=true;
+  const changed=presenter.present(draw(snapshot,state,110,34,2));
+  expect((changed.match(/\x1b\[\d+;1H/g)??[]).length).toBeLessThan(4);
+ });
+ it("stages animation uploads before synchronized swaps without reprinting unchanged text",()=>{
+  const snapshot={version:1,cwd:"/tmp",connected:true,updatedAt:Date.now(),plans:[],contracts:[],runs:[{
+   runId:"r",name:"Run",status:"running",totalTokens:0,durationMs:100,nodes:[{id:"a",label:"a",status:"running",visits:1}],edges:[],logs:[]}]};
+  const state=createViewState(),presenter=new FramePresenter(100);
+  presenter.present(draw(snapshot,state,110,34,0));
+  const animation=presenter.present(draw(snapshot,state,110,34,1));
+  expect(animation.indexOf("a=t,f=100")).toBeLessThan(animation.indexOf("\x1b[?2026h"));
+  expect(animation.indexOf("a=p,i=101")).toBeGreaterThan(animation.indexOf("\x1b[?2026h"));
+  expect(animation.indexOf("a=d,d=I,i=100")).toBeGreaterThan(animation.indexOf("a=p,i=101"));
+  expect(animation).not.toContain("PI WORKSPACE");
+  snapshot.runs[0].nodes[0].status="done";
+  presenter.present(draw(snapshot,state,110,34,2));
+  expect(presenter.present(draw(snapshot,state,110,34,3))).toBe("");
+  state.tab=1;
+  expect(presenter.present(draw(snapshot,state,110,34,4))).toContain("a=d,d=I");
+  expect(presenter.present(draw(snapshot,state,110,34,5))).toBe("");
  });
  it("draws all sections, empty state, narrow terminal, and disconnected state",()=>{
   const s={version:1,cwd:"/tmp",connected:true,updatedAt:Date.now(),runs:[],plans:[{id:"p",name:"Plan",content:"# Heading\n\nText"}],contracts:[]};

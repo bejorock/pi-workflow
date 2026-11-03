@@ -2,6 +2,7 @@
 /** Standalone, read-only PTY viewer. Started only by /workspace-dashboard. */
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { sliceByColumn } from '@earendil-works/pi-tui';
 import { kittyUpload, kittyPlace, kittyDelete, kittyProbeSequence, probeReplyPattern,
   CELL_SIZE_QUERY, renderGraphPng, graphGeometry, statusInfo } from './graphics.mjs';
 import { color, fg, palette, fit, safeText, renderMarkdown } from './markdown.mjs';
@@ -53,16 +54,19 @@ export function createViewState() {
 }
 
 export function draw(snapshot,state,width,height,elapsed,cellRatio=.5) {
-  const lines=Array.from({length:height},(_,y)=>`${CSI}${y+1};1H${' '.repeat(width)}`);
+  const lines=Array.from({length:height},()=> ' '.repeat(width));
   const put=(x,y,text,w=width-x) => {
     if(y<0||y>=height||x<0) return;
-    lines[y]+=`${CSI}${y+1};${x+1}H${fit(text.replace(/[\r\n\t]/g,' '),w)}`;
+    w=Math.max(0,Math.min(w,width-x));
+    const reset=CSI+'0m'+CSI+'48;2;13;16;26m'+CSI+'38;2;215;226;240m';
+    lines[y]=sliceByColumn(lines[y],0,x)+reset+fit(text.replace(/[\r\n\t]/g,' '),w)
+      +reset+sliceByColumn(lines[y],x+w,width-x-w);
   };
   state.hits=[];
   put(0,0,color('cyan',' ◈ PI WORKSPACE')+color('muted','  /  read-only observatory'));
   if(width<86||height<28) {
     put(2,3,color('amber',`Resize to at least 86 × 28 (current ${width} × ${height}). q to quit.`));
-    return {text:CSI+'48;2;13;16;26m'+CSI+'2J'+lines.join(''),graph:null};
+    return {text:serializeRows(lines),rows:lines,width,height,graph:null};
   }
   const tabs=['Workflows','Plans','Contracts'];
   for(let i=0;i<3;i++) {
@@ -141,12 +145,55 @@ export function draw(snapshot,state,width,height,elapsed,cellRatio=.5) {
   }
   put(0,height-1,color('muted',state.editing?' Type to filter · Enter: apply · Esc: clear':' 1/2/3 sections · ↑↓ select · ←→ node · PgUp/PgDn scroll · / filter · q quit'));
   // No clear-screen during normal repaint: it would remove graphics each frame.
-  return {text:CSI+'48;2;13;16;26m'+lines.join(''),graph};
+  return {text:serializeRows(lines),rows:lines,width,height,graph};
+}
+
+const ROW_STYLE=CSI+'0m'+CSI+'48;2;13;16;26m'+CSI+'38;2;215;226;240m';
+function serializeRows(rows) {
+  return rows.map((row,y)=>`${CSI}${y+1};1H${ROW_STYLE}${row}`).join('');
+}
+
+/** Diff final rows, not drawing commands. Keep the displayed image untouched
+ * during upload; atomically swap text/placement/deletion in DEC synchronized
+ * output. Static documents and settled graphs generate zero repeated output.
+ */
+export class FramePresenter {
+  constructor(imageId) { this.id=imageId;this.rows=[];this.size='';this.image=null;this.graphKey='';this.frame=0; }
+  present(view) {
+    const size=`${view.width}:${view.height}`;
+    const resized=this.size!==size;
+    const changed=[];
+    for(let y=0;y<view.rows.length;y++)if(resized||view.rows[y]!==this.rows[y]) {
+      changed.push(`${CSI}${y+1};1H${ROW_STYLE}${view.rows[y]}`);
+    }
+    this.rows=[...view.rows];this.size=size;
+    let upload='',swap='';
+    if(view.graph) {
+      const g=view.graph;
+      const key=JSON.stringify([g.nodes,g.edges,g.geometry,g.selected]);
+      const animate=g.nodes.some(n=>n.status==='running');
+      if(resized||key!==this.graphKey||animate||this.image===null) {
+        const current=this.id+(this.frame++%2);
+        const png=renderGraphPng(g.nodes,g.edges,g.width,g.height,g.time,{geometry:g.geometry,selected:g.selected});
+        // Large base64 transfer is outside the synchronized paint interval.
+        // This ID is not the visible one, so slow transfer cannot blank it.
+        upload=kittyUpload(png.toString('base64'),current);
+        swap=`${CSI}${g.y+1};${g.x+1}H`+kittyPlace(current,g.w,g.h);
+        if(this.image!==null)swap+=kittyDelete(this.image);
+        this.image=current;this.graphKey=key;
+      }
+    } else if(this.image!==null) {
+      swap=kittyDelete(this.image);this.image=null;this.graphKey='';
+    }
+    if(!changed.length&&!swap)return '';
+    // A single write does not imply a single terminal frame; PTYs split writes.
+    return upload+CSI+'?2026h'+changed.join('')+swap+CSI+'?2026l';
+  }
 }
 
 export async function runViewer(file) {
   if(!process.stdin.isTTY||!process.stdout.isTTY||process.platform==='win32') throw Error('Dashboard requires a Linux/macOS terminal PTY.');
-  let entered=false,timer,watcher,input='',stopped=false,previous=null;
+  let entered=false,timer,watcher,input='',stopped=false;
   const initialEncoding=process.stdin.readableEncoding;
   const initialRaw=process.stdin.isRaw;
   const id=100000+Math.floor(Math.random()*1000000000),queryId=id+2;
@@ -157,7 +204,7 @@ export async function runViewer(file) {
     clearInterval(timer);clearInterval(watcher);
     process.stdin.removeListener('data',onData);
     process.removeListener('SIGINT',cleanup);process.removeListener('SIGTERM',cleanup);
-    if(entered)process.stdout.write(kittyDelete(id)+kittyDelete(id+1)+'\x1b[0m'+CSI+'?1000l'+CSI+'?1006l'+CSI+'?7h'+CSI+'?25h'+CSI+'?1049l');
+    if(entered)process.stdout.write(CSI+'?2026l'+kittyDelete(id)+kittyDelete(id+1)+'\x1b[0m'+CSI+'?1000l'+CSI+'?1006l'+CSI+'?7h'+CSI+'?25h'+CSI+'?1049l');
     process.stdin.setRawMode(!!initialRaw);process.stdin.pause();
     if(initialEncoding)process.stdin.setEncoding(initialEncoding);
   };
@@ -222,21 +269,14 @@ export async function runViewer(file) {
     entered=true;process.stdout.write(CSI+'?1049h'+CSI+'?25l'+CSI+'?7l'+CSI+'?1000h'+CSI+'?1006h'+CSI+'48;2;13;16;26m'+CSI+'2J');
     process.stdin.on('data',onData);
     watcher=setInterval(()=>{try{snapshot=readSnapshot(file);}catch{/* Keep final snapshot; heartbeat makes disconnect visible. */}},1000);
-    let frame=0;const start=Date.now();
+    const presenter=new FramePresenter(id);
+    const start=Date.now();
     const paint=()=>{
       if(stopped||process.stdout.writableNeedDrain)return;
       try {
         const view=draw(snapshot,state,process.stdout.columns??110,process.stdout.rows??34,(Date.now()-start)/1000,ratio);
-        let output=view.text;
-        if(view.graph) {
-          const g=view.graph,current=id+(frame++%2);
-          const png=renderGraphPng(g.nodes,g.edges,g.width,g.height,g.time,{geometry:g.geometry,selected:g.selected});
-          // Upload/place first, then delete old frame. At most two owned images.
-          output+=kittyUpload(png.toString('base64'),current)+`${CSI}${g.y+1};${g.x+1}H`+kittyPlace(current,g.w,g.h);
-          if(previous!==null)output+=kittyDelete(previous);
-          previous=current;
-        } else if(previous!==null){output+=kittyDelete(previous);previous=null;}
-        process.stdout.write(output);
+        const output=presenter.present(view);
+        if(output)process.stdout.write(output);
       } catch(error){cleanup();console.error(`Dashboard: ${safeText(error.message)}`);}
     };
     paint();timer=setInterval(paint,100);
