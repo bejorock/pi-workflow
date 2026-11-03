@@ -183,7 +183,8 @@ export class ChannelClient {
 		// unblocks the child. Supervisor questions expire slightly past the
 		// broker-side 10-minute timeout so the broker always fires first.
 		const isHuman = request.kind === "human";
-		const timeoutMs = options.timeoutMs ?? (isHuman ? Infinity : 11 * 60 * 1000);
+		const controlled = process.env.PI_WORKFLOW_CONTROLLED === "1";
+		const timeoutMs = options.timeoutMs ?? (isHuman || controlled ? Infinity : 11 * 60 * 1000);
 		const deadline = isHuman ? Infinity : Date.now() + timeoutMs;
 
 		while (Date.now() < deadline) {

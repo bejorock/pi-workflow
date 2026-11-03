@@ -120,6 +120,7 @@ export function validateQuestions(questions: TUIQuestion[]): TUIResult["error"] 
 export async function runAskUserQuestionTUI(
 	ctx: ExtensionContext,
 	questions: TUIQuestion[],
+	signal?: AbortSignal,
 ): Promise<TUIResult> {
 	if (ctx.mode !== "tui" || !ctx.ui) {
 		return { answers: [], cancelled: false, error: "no_ui" };
@@ -130,7 +131,13 @@ export async function runAskUserQuestionTUI(
 		return { answers: [], cancelled: false, error: validationError };
 	}
 
+	if (signal?.aborted) return { answers: [], cancelled: true };
+	let cancelDialog: (() => void) | undefined;
+	try {
 	const result = await ctx.ui.custom<TUIResult>((tui, theme, _kb, done) => {
+		cancelDialog = () => done({ answers: [], cancelled: true });
+		signal?.addEventListener("abort", cancelDialog, { once: true });
+		if (signal?.aborted) queueMicrotask(cancelDialog);
 		// Active state
 		let currentTab = 0; // 0..questions.length (last is Submit)
 		let optionIndex = 0; // active index in options list
@@ -766,4 +773,7 @@ export async function runAskUserQuestionTUI(
 	});
 
 	return result;
+	} finally {
+		if (cancelDialog) signal?.removeEventListener("abort", cancelDialog);
+	}
 }

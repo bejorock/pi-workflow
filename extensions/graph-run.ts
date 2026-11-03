@@ -199,6 +199,7 @@ export async function executeGraphRun(options: GraphRunOptions): Promise<GraphRu
 	const channelEnv: Record<string, string> = {
 		[PI_WORKFLOW_CHANNEL_DIR_ENV]: chDir,
 		[PI_WORKFLOW_RUN_ID_ENV]: runId,
+		PI_WORKFLOW_CONTROLLED: "1",
 	};
 
 	const context = new GraphRunContext({

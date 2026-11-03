@@ -20,7 +20,7 @@ export interface WorkflowModeState {
 const PLAN_MODE_DISABLED_TOOLS = new Set<string>([
 	"write", "edit",
 	"subagent", "subagent_wait",
-	"workflow", "workflow_status", "workflow_stop", "workflow_reply",
+	"workflow", "workflow_wait", "workflow_status", "workflow_stop", "workflow_reply",
 	"ask_supervisor",
 	"list_agents", "list_workflows",
 ]);
@@ -99,7 +99,7 @@ export const PLAN_MODE_SYSTEM_DIRECTIVE = `## PLAN MODE ACTIVE
 
 You are in **plan mode** — read-only planning and investigation.
 - Direct file mutations (\`write\`/\`edit\`) are disabled.
-- All subagent and workflow tools are disabled (\`subagent\`, \`subagent_wait\`, \`workflow\`, \`workflow_status\`, \`workflow_stop\`, \`workflow_reply\`, \`ask_supervisor\`, \`list_agents\`, \`list_workflows\`).
+- All subagent and workflow tools are disabled (\`subagent\`, \`subagent_wait\`, \`workflow\`, \`workflow_wait\`, \`workflow_status\`, \`workflow_stop\`, \`workflow_reply\`, \`ask_supervisor\`, \`list_agents\`, \`list_workflows\`).
 - Bash is restricted to read-only commands (e.g. \`cat\`, \`grep\`, \`ls\`, \`git status\`, \`git diff\`).
 - Focus on planning, discussing architectural designs, researching code, and answering questions. Do not attempt to write code or delegate to agents.`;
 
@@ -158,13 +158,13 @@ export function registerWorkflowMode(
 		const kept = activeToolNames.filter((name) => !disabled.has(name));
 		// Make sure core workflow tools are available if the mode is workflow
 		if (mode === "workflow") {
-			return [...new Set([...kept, "workflow", "workflow_status", "workflow_stop", "list_agents", "list_workflows"])];
+			return [...new Set([...kept, "workflow", "workflow_wait", "workflow_reply", "workflow_status", "workflow_stop", "list_agents", "list_workflows"])];
 		}
 		if (mode === "plan") {
 			// Plan mode: read-only investigation only, no subagent/workflow tools at all
 			return kept;
 		}
-		return [...new Set([...kept, "write", "edit", "subagent", "workflow", "workflow_status", "workflow_stop"])];
+		return [...new Set([...kept, "write", "edit", "subagent", "workflow", "workflow_wait", "workflow_reply", "workflow_status", "workflow_stop"])];
 	}
 
 	function setMode(mode: SessionMode, ctx?: ExtensionContext): void {
@@ -251,7 +251,7 @@ export function registerWorkflowMode(
 	const disabledInPlan = new Set<string>([
 		"write", "edit",
 		"subagent", "subagent_wait",
-		"workflow", "workflow_status", "workflow_stop", "workflow_reply",
+		"workflow", "workflow_wait", "workflow_status", "workflow_stop", "workflow_reply",
 		"ask_supervisor",
 		"list_agents", "list_workflows",
 	]);

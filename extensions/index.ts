@@ -51,6 +51,7 @@ import { TechnicalFailureError, type FailureClassification } from "./failure-cla
 import { WorkflowManager } from "./workflow-manager.ts";
 import { openWorkflowNavigator } from "./workflow-ui.ts";
 import { registerTaskPanel } from "./task-panel.ts";
+import { WorkflowController, SupervisorReminders, createWorkflowWaitTool } from "./workflow-controller.ts";
 import { registerWorkspaceDashboard } from "./workspace-dashboard.ts";
 import { registerWorkflowMode } from "./workflow-mode.ts";
 import { registerBlankStopGuard } from "./blank-stop-guard.ts";
@@ -960,7 +961,8 @@ export default function (pi: ExtensionAPI) {
 	// here. The sinks route each request to whoever can answer it: the user's
 	// TUI for human questions, the main agent's conversation for supervisor ones.
 	const globalBroker = new RequestBroker();
-	installBrokerSinks({ pi, broker: globalBroker });
+	const workflowController = new WorkflowController(globalWorkflowManager, globalBroker);
+	installBrokerSinks({ pi, broker: globalBroker, controller: workflowController });
 	globalBroker.start();
 
 	// Captured at session_start; used by tools/commands that need the working dir.
@@ -975,16 +977,42 @@ export default function (pi: ExtensionAPI) {
 	// The manager is passed in so runs appear in /workflows, the task panel,
 	// and workflow_status. Without it the tool still runs, but every one of
 	// those surfaces reports an empty run list.
-	const workflowTool = createGraphWorkflowTool({ workflowManager: globalWorkflowManager, broker: globalBroker });
+	const workflowTool = createGraphWorkflowTool({ workflowManager: globalWorkflowManager, broker: globalBroker, controller: workflowController });
+	pi.registerTool(createWorkflowWaitTool(workflowController));
 	pi.registerTool(workflowTool);
 	registerWorkflowStatusTool(pi, globalWorkflowManager);
 	registerWorkflowStopTool(pi, globalWorkflowManager);
 
-	// Runs are background-only, so a graph's report is not a tool result. It is
-	// injected into the conversation when the walk finishes; without this, a
-	// finished run would be visible only in /workflows and the model would never
-	// learn what it produced.
-	installResultDelivery(pi, globalWorkflowManager);
+	// Preserve legacy subagent delivery. Controlled graphs exclusively return
+	// reports through their waiter or idle fallback, never both.
+	installResultDelivery(pi, globalWorkflowManager, runId => workflowController.owns(runId));
+
+	let reminderIsIdle = () => true;
+	let latestReminderUi: { notify: (text: string, type?: "info" | "warning" | "error") => void } | undefined;
+	const reminders = new SupervisorReminders(globalBroker, workflowController,
+		(text, requests, reminder) => {
+			pi.sendMessage({ customType: reminder ? "workflow-supervisor-reminder" : requests.length ? "workflow-agent-question" : "workflow-result", content: text, display: true },
+				{ triggerTurn: true, deliverAs: "followUp" });
+		},
+		text => latestReminderUi?.notify(text, "warning"));
+	let reminderTimer: ReturnType<typeof setInterval> | undefined;
+	pi.on("agent_start", () => reminders.busy());
+	pi.on("agent_settled", () => reminders.settled());
+	pi.on("session_shutdown", async () => {
+		clearInterval(reminderTimer); reminders.clear(); workflowController.stopAll(); globalBroker.stop();
+	});
+	pi.on("session_start", (_event, ctx) => {
+		latestReminderUi = ctx.ui;
+		clearInterval(reminderTimer);
+		reminderIsIdle = () => ctx.isIdle();
+		reminderTimer = setInterval(() => {
+			try {
+				if (!reminderIsIdle()) reminders.busy();
+				reminders.tick();
+			} catch { /* Stale UI/delivery must never crash a workflow. */ }
+		}, 250); reminderTimer.unref();
+		reminders.settled();
+	});
 
 	// --- Agent Catalog ---
 	pi.registerTool(createListAgentsTool());
@@ -1455,6 +1483,7 @@ export default function (pi: ExtensionAPI) {
 		// invisible to the model even though the tool is registered/callable.
 		const toActivate = [workflowTool.name];
 		if (!active.includes("workflow_reply")) toActivate.push("workflow_reply");
+		if (!active.includes("workflow_wait")) toActivate.push("workflow_wait");
 		if (!active.includes("subagent")) toActivate.push("subagent");
 		if (!active.includes("ask_user_question")) toActivate.push("ask_user_question");
 		if (!active.includes("ask_supervisor")) toActivate.push("ask_supervisor");

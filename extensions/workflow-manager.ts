@@ -533,10 +533,11 @@ export class WorkflowManager extends EventEmitter {
 
 	stopRun(runId: string): boolean {
 		const run = this.runs.get(runId);
-		if (!run || run.status !== "running") return false;
+		if (!run || (run.status !== "running" && run.status !== "paused")) return false;
 
 		run.status = "stopped";
 		run.snapshot.status = "cancelled";
+		run.snapshot.durationMs = Date.now() - run.startedAt;
 		if (run.abortController) {
 			run.abortController.abort();
 		}

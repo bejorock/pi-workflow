@@ -67,7 +67,7 @@ describe("workflow runs in the background", () => {
 		);
 	}
 
-	it("returns before the walk has finished", async () => {
+	it("waits for the walk while keeping the event loop responsive", async () => {
 		// The spawn never settles until released, so if execute() waited for
 		// the run this test would time out rather than fail.
 		let release!: () => void;
@@ -90,26 +90,27 @@ describe("workflow runs in the background", () => {
 			}) as never,
 		});
 
-		const receipt = await run(tool);
-
+		let returned = false;
+		const pending = run(tool).then(result => { returned = true; return result; });
+		await new Promise(resolve => setTimeout(resolve, 30));
 		expect(spawnStarted, "the run must already be underway").toBe(true);
-		const text = receipt.content.map((c) => ("text" in c ? c.text : "")).join("");
-		expect(text).toContain("started in the background");
-		expect((receipt.details as { background?: boolean }).background).toBe(true);
-
+		expect(returned).toBe(false);
 		release();
+		const receipt = await pending;
+		expect(receipt.content.map(c => "text" in c ? c.text : "").join("")).toContain("completed");
+		expect((receipt.details as { background?: boolean }).background).toBe(false);
 		const report = await tracker.settled();
 		expect(report?.status).toBe("completed");
 	});
 
-	it("tells the model to end its turn rather than poll", async () => {
+	it("returns the final report without a duplicate background delivery instruction", async () => {
 		const { tool, tracker } = toolWith();
 		const receipt = await run(tool);
 		await tracker.settled();
 
 		const text = receipt.content.map((c) => ("text" in c ? c.text : "")).join("");
-		expect(text).toMatch(/end your turn/i);
-		expect(text).toMatch(/notified/i);
+		expect(text).toMatch(/completed/i);
+		expect(text).not.toMatch(/end your turn/i);
 	});
 
 	it("names the run and its nodes so the receipt is actionable on its own", async () => {

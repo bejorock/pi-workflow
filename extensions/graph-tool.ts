@@ -1,20 +1,14 @@
 /**
  * The `workflow` tool — graph-based multi-agent coordination.
  *
- * The tool validates and detaches. It parses the script, checks it against the
- * agent roster, resolves resume state, and then starts the walk *without
- * awaiting it*, returning a run id so the turn can end immediately.
- *
- * There is no foreground mode. A blocking run would leave the main agent stuck
- * inside this call for the whole walk, which is precisely what makes
- * `ask_supervisor` impossible: an agent that cannot take a turn cannot answer a
- * question. Offering both modes would mean every downstream feature has to
- * document which of them it works in.
- *
- * The report is delivered back into the conversation when the walk finishes
- * (see result-delivery.ts).
+ * Execution stays background-owned, but every call attaches a foreground
+ * controller until completion or supervisor attention. The caller answers via
+ * workflow_reply and reattaches with workflow_wait. Interrupting either waiter
+ * stops the underlying run; reports/questions have a single delivery owner.
  */
 
+import { WorkflowController } from "./workflow-controller.ts";
+import { WorkflowManager as ControllerManager } from "./workflow-manager.ts";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { buildAgentCatalogSummary } from "./agent-catalog.ts";
@@ -34,7 +28,6 @@ import { buildGraphFromScript, GraphValidationError } from "./graph-validator.ts
 import { GraphDisplayBridge } from "./graph-display-bridge.ts";
 import type { GraphRunContext } from "./graph-run-context.ts";
 import { executeGraphRun, type GraphRunReport } from "./graph-run.ts";
-import { stageRunReport } from "./result-delivery.ts";
 import { loadSavedWorkflowScript } from "./workflow-library.ts";
 import type { WorkflowManager } from "./workflow-manager.ts";
 import type { RequestBroker } from "./request-broker.ts";
@@ -149,7 +142,7 @@ const GraphToolParams = Type.Object({
 	allowConcurrentDuplicate: Type.Optional(
 		Type.Boolean({
 			description:
-				"Start this graph even though another run of the same name is already in flight. Default false, because a same-name collision is almost always an accidental double-submit.",
+				"Legacy parameter retained for compatibility; cannot bypass the mandatory one-active-workflow limit.",
 		}),
 	),
 });
@@ -171,17 +164,19 @@ export interface GraphToolOptions {
 	/**
 	 * Called with the detached run's promise.
 	 *
-	 * The tool cannot await the walk — that is the whole point — so tests need
-	 * a handle on it to know when it finished. Production ignores it; delivery
-	 * happens through the manager's completion events instead.
+	 * Execution remains independent of the waiting tool so supervisor attention
+	 * can yield early. Tests use this handle to observe final engine settlement.
 	 */
 	onRunDetached?: (info: { runId: string; done: Promise<GraphRunReport | undefined> }) => void;
 	/** The broker for judgement requests from child processes. */
 	broker?: RequestBroker;
+	controller?: WorkflowController;
 }
 
 export function createGraphWorkflowTool(options: GraphToolOptions = {}): ToolDefinition {
 	const spawnAgent = options.spawnAgent ?? runSingleAgent;
+	const manager = options.workflowManager ?? new ControllerManager();
+	const controller = options.controller ?? new WorkflowController(manager, options.broker);
 
 	return defineTool({
 		name: "workflow",
@@ -194,6 +189,7 @@ export function createGraphWorkflowTool(options: GraphToolOptions = {}): ToolDef
 		promptSnippet:
 			"Run a coordinating graph of agents. Required header: export const meta = { name, description }. Nodes are agent()/human(); edges are direct or (state, result) => target.",
 		promptGuidelines: [
+			"Workflow automatically waits for completion or supervisor questions. Only one active workflow is allowed, including paused/waiting runs. On supervisor attention answer every request with workflow_reply, then immediately call workflow_wait with the runId. Interrupting workflow or workflow_wait stops the run.",
 			"For workflow, write the script as one raw JavaScript string with no Markdown fences or surrounding prose.",
 			"For workflow, the first statement must be `export const meta = { name: 'short_snake_case', description: 'what this graph does' }`.",
 			"For workflow, available globals are graph, agent, human, END, args, and JSON. There is no fs, process, require, import, fetch, Date, or Math.random — a graph describes routing only.",
@@ -395,7 +391,9 @@ export function createGraphWorkflowTool(options: GraphToolOptions = {}): ToolDef
 			// The run outlives this tool call, so it cannot use the call's signal:
 			// that aborts the moment execute() returns. It gets its own controller,
 			// which /workflows and stopRun() reach through the manager.
+			if (signal?.aborted) throw new Error("Workflow interrupted before start.");
 			const runAbort = new AbortController();
+			controller.begin(runId, meta.name, runAbort);
 
 			const display = options.workflowManager
 				? new GraphDisplayBridge({
@@ -451,8 +449,7 @@ export function createGraphWorkflowTool(options: GraphToolOptions = {}): ToolDef
 					nodeStateBuffers: context.nodeStateBuffers,
 				});
 
-			// Detach. Everything below this line happens after the tool has
-			// returned and the turn has ended.
+			// Start the independently owned engine, then attach the mandatory waiter.
 			const done = executeGraphRun({
 				runId,
 				cwd,
@@ -475,9 +472,9 @@ export function createGraphWorkflowTool(options: GraphToolOptions = {}): ToolDef
 				onRunComplete: options.onRunComplete,
 			})
 				.then((report) => {
-					// Staged before the display marks the run complete, because
-					// that is what fires the event delivery listens for.
-					if (options.workflowManager) stageRunReport(options.workflowManager, report);
+					// Store completion before manager events; the controller exclusively
+					// owns model delivery while widgets/toasts observe normal events.
+					controller.complete(report);
 					display?.runCompleted(report.result);
 					return report;
 				})
@@ -485,6 +482,7 @@ export function createGraphWorkflowTool(options: GraphToolOptions = {}): ToolDef
 					// A detached run has no tool call left to fail, so a crash has to
 					// be reported through the manager or it vanishes silently.
 					const message = error instanceof Error ? error.message : String(error);
+					controller.complete({ runId, name: meta.name, text: `Workflow ${meta.name} (${runId}) failed: ${message}` });
 					display?.runFailed(message);
 					return undefined;
 				});
@@ -492,12 +490,8 @@ export function createGraphWorkflowTool(options: GraphToolOptions = {}): ToolDef
 			// Never let the detached promise reject unhandled: that crashes the
 			// whole pi process, taking the user's session with it.
 			void done.catch(() => {});
+			controller.setDone(runId, done);
 			options.onRunDetached?.({ runId, done });
-
-			const nodeList = nodeIds.join(" -> ");
-			const started = params.resumeRunId
-				? `Resumed workflow "${meta.name}" in the background.`
-				: `Workflow "${meta.name}" started in the background.`;
 
 			// The decode path recovers a losslessly-recoverable shape, but a
 			// well-formed tool call should never need it — surface it rather
@@ -512,20 +506,19 @@ export function createGraphWorkflowTool(options: GraphToolOptions = {}): ToolDef
 				);
 			}
 
+			const controlled = await controller.wait(runId, signal);
 			return {
 				content: [
 					{
 						type: "text" as const,
 						text: [
-							started,
+							controlled.text,
 							argsWasDecodedFromString
 								? "  note: args arrived as a JSON string, not an object, and was decoded. This should not normally happen — pass args as an object literal."
 								: undefined,
 							`  runId: ${runId}`,
-							`  nodes: ${nodeList}`,
-							"",
-							"The run continues after this turn ends. You will be notified with the full report when it finishes,",
-							"so end your turn now rather than polling. Use workflow_status if the user asks about progress.",
+							`  nodes: ${nodeIds.join(" -> ")}`,
+
 						]
 							.filter((line): line is string => line !== undefined)
 							.join("\n"),
@@ -534,7 +527,9 @@ export function createGraphWorkflowTool(options: GraphToolOptions = {}): ToolDef
 				details: {
 					runId,
 					name: meta.name,
-					background: true,
+					background: false,
+					status: controlled.status,
+					requestIds: controlled.requestIds,
 					nodeIds,
 					resumed: Boolean(params.resumeRunId),
 					argsWasDecodedFromString,

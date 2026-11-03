@@ -111,13 +111,25 @@ const DEFAULT_SUPERVISOR_TIMEOUT_MS = 10 * 60 * 1000;
  * sink for rendering.
  */
 export class RequestBroker {
-	private pending = new Map<string, { request: PendingRequest; resolve: ResolveFn }>();
+	private pending = new Map<string, { request: PendingRequest; resolve: ResolveFn; abort: AbortController }>();
+
+	signalFor(requestId: string): AbortSignal | undefined { return this.pending.get(requestId)?.abort.signal; }
 	private queue: PendingRequest[] = [];
 	private currentBatch: PendingRequest[] | null = null;
 	private batchClosesAt = 0;
 	private readonly coalesceMs: number;
 	private readonly supervisorTimeoutMs: number;
 	private nextId = 0;
+	private heldSupervisorRuns = new Set<string>();
+	private supervisorBusy = false;
+
+	holdSupervisorExpiry(runId: string, hold: boolean): void {
+		if (hold) this.heldSupervisorRuns.add(runId); else this.heldSupervisorRuns.delete(runId);
+	}
+	setSupervisorBusy(busy: boolean): void { this.supervisorBusy = busy; }
+	extendSupervisorExpiry(ms: number): void {
+		for (const { request } of this.pending.values()) if (request.expiresAt !== undefined) request.expiresAt += ms;
+	}
 
 	/** Set by the sink when it starts processing a batch. */
 	private onBatchReady: ((batch: PendingRequest[]) => void) | null = null;
@@ -149,7 +161,7 @@ export class RequestBroker {
 
 		const full: PendingRequest = { ...request, id, createdAt, expiresAt };
 		const promise = new Promise<BrokerResult>((resolve) => {
-			this.pending.set(id, { request: full, resolve });
+			this.pending.set(id, { request: full, resolve, abort: new AbortController() });
 			this.addToBatch(full);
 		});
 
@@ -177,7 +189,7 @@ export class RequestBroker {
 
 		// Close the coalescing window.
 		if (this.currentBatch !== null && Date.now() >= this.batchClosesAt) {
-			const batch = this.currentBatch;
+			const batch = this.currentBatch.filter(r => this.pending.has(r.id));
 			this.currentBatch = null;
 			actions++;
 			this.onBatchReady?.(batch);
@@ -185,7 +197,7 @@ export class RequestBroker {
 
 		// Expire supervisor requests.
 		for (const [id, { request, resolve }] of this.pending) {
-			if (request.expiresAt !== undefined && Date.now() >= request.expiresAt) {
+			if (request.expiresAt !== undefined && !this.supervisorBusy && !this.heldSupervisorRuns.has(request.runId) && Date.now() >= request.expiresAt) {
 				this.pending.delete(id);
 				actions++;
 				resolve({
@@ -221,6 +233,7 @@ export class RequestBroker {
 		const entry = this.pending.get(requestId);
 		if (!entry) return;
 		this.pending.delete(requestId);
+		entry.abort.abort();
 		entry.resolve({ requestId, ...result });
 	}
 
@@ -252,6 +265,7 @@ export class RequestBroker {
 		const entry = this.pending.get(requestId);
 		if (!entry) return;
 		this.pending.delete(requestId);
+		entry.abort.abort();
 		const { request } = entry;
 
 		if (request.kind === "human" && request.default !== undefined) {

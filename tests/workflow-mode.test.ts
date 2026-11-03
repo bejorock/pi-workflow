@@ -198,7 +198,7 @@ describe("registerWorkflowMode /wf modes", () => {
 		expect(pi.activeTools).not.toContain("write");
 
 		await pi.commands.wf.handler("normal", ctx);
-		expect(pi.activeTools.sort()).toEqual(before.sort());
+		expect(pi.activeTools.sort()).toEqual([...new Set([...before, "workflow_wait", "workflow_reply"])].sort());
 		expect(ctx.notifications[1].message).toContain("NORMAL");
 		expect(ctx.widgets["pi-workflow-mode"].lines[0]).toContain("Normal");
 	});

@@ -869,6 +869,30 @@ without being forced to read them.
 | `/agents` | Show the discovered agent roster |
 | `/saved-workflows` | List or delete saved workflow scripts |
 
+### Foreground controller over background execution
+
+Every `workflow()` call now waits for the run's final report **or supervisor attention**. The graph
+executor remains independently scheduled, so the dashboard, widgets, events, and human dialogs work
+while the tool is pending. There is no background-only flag. Only **one active graph workflow** per Pi
+session is permitted, including paused runs and runs awaiting answers; the slot is released after
+execution settles. This does not cap the workflow's internal parallel branches or ordinary subagents.
+
+When supervisor questions are returned, answer every request via `workflow_reply`, then immediately
+call **`workflow_wait({ runId })`**. Waiting checks stored state first, so questions/completion between
+calls are not missed. Explicit run identity prevents late events from being attributed to a new run.
+Interrupting either `workflow` or `workflow_wait` **stops the run**, aborts children, and cancels pending
+broker dialogs. Merely dismissing a human question retains its existing default/cancellation semantics.
+
+Supervisor questions and final reports have exclusive delivery ownership: the attached tool delivers
+them, or an idle fallback does if the agent never reattaches. Already-delivered questions are not repeated.
+For unanswered requests, after the supervisor settles and remains idle for **30 seconds**, a brief reminder
+references the request ID. At most **three reminders** are sent, only across genuine idle periods.
+If still unanswered after the third reminder's opportunity to act and another idle grace, a single
+human toast is shown. No modal, default answer, or automatic stop is performed. A reply, stop, cancellation,
+or expiry clears reminder tracking; new request IDs start fresh. Controlled workflow requests have no
+wall-clock supervisor timeout, so a long investigation is not mistaken for neglect. Standalone subagents
+retain their existing timeout, excluding observed supervisor busy time.
+
 ### Concise human questions
 
 Human-facing prompts are bounded in both `ask_user_question` and workflow `human()` nodes:

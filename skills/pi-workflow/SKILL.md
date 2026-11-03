@@ -38,6 +38,31 @@ The result is the subagent's output string. Use it in your response or chain it 
 subagent(tasks=[{"agent": "scout", "task": "Review auth module"}, {"agent": "scout", "task": "Review payment module"}], mode="parallel")
 ```
 
+## Workflow Controller Lifecycle
+
+Every `workflow()` call **waits automatically** for completion or supervisor attention; there is no
+start-and-return background-only mode. The underlying engine still runs independently so UI widgets,
+events, human questions, and the dashboard keep updating. Only **one active graph workflow** is allowed
+per Pi session, including paused runs and runs waiting for a human/supervisor. A legacy duplicate-run
+flag cannot bypass this cap. Do not start a second workflow while one is active.
+
+When the tool returns supervisor requests:
+1. Answer **all** outstanding request IDs using `workflow_reply({ requestId, answer })`, not prose.
+2. Immediately call `workflow_wait({ runId })` to reattach the foreground controller.
+3. Repeat if more supervisor requests arrive. A final report means execution is finished.
+
+`workflow_wait` defaults to the current active run, but pass the explicit run ID for clarity.
+**Interrupting `workflow` or `workflow_wait` stops the underlying run**, cancels pending questions,
+and aborts child execution; it does not merely detach. Use `workflow_status` to inspect journaled results.
+
+Original supervisor questions and final reports are delivered once, either through the attached tool
+or an idle background fallback. Do not wait for a duplicate notification. The supervisor can investigate
+before replying: reminders wait for `agent_settled` plus **30 seconds of continuous idle**, never interrupt
+busy work, and stop after **three reminders**. If still unanswered after the third reminder's turn and
+another idle grace, the human receives one notification (no modal and no automatic answer/stop).
+Reply, stop, cancellation, or expiry clears reminder tracking; each new request starts fresh.
+Controlled graph supervisor requests do not expire on a wall-clock timer during investigation.
+
 ## How to Run a Workflow
 
 The `workflow` tool runs a **graph** of coordinating agents: nodes are agents, edges decide where

@@ -254,7 +254,9 @@ export class GraphDisplayBridge {
 			// The path is the single most useful line for a human scanning a
 			// finished run: it shows which agents ran and where work looped.
 			this.manager.log(this.runId, `Path: ${result.path.join(" → ")}`);
-			this.manager.completeRun(this.runId, result.finalResult, result.error);
+			if (result.status === "aborted" || this.manager.getRun(this.runId)?.status === "stopped") {
+				this.manager.stopRun(this.runId);
+			} else this.manager.completeRun(this.runId, result.finalResult, result.error);
 		} catch {
 			// Ignore display failures.
 		}

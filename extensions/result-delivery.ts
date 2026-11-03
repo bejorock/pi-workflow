@@ -1,10 +1,8 @@
 /**
  * Delivers a finished background run back into the conversation.
  *
- * Runs are background-only, so a graph's report is no longer a tool result —
- * the tool returned a run id and the turn ended long before the walk finished.
- * The report therefore has to be injected as its own message, and it has to
- * trigger a turn: a report the model never reads is the same as no report.
+ * Legacy subagent reports use follow-up delivery. Graphs owned by a foreground
+ * controller are excluded: their tool result or idle fallback owns the report.
  *
  * `deliverAs: "followUp"` is the delivery mode that respects the user. If they
  * are mid-turn when the run finishes, the report waits until that turn is done
@@ -33,6 +31,7 @@ export interface DeliverableRun {
  */
 interface DeliveryHolder {
 	pi: ExtensionAPI;
+	controlled: (runId: string) => boolean;
 }
 
 interface ManagerWithDelivery {
@@ -65,16 +64,16 @@ function takeRunReport(manager: WorkflowManager, runId: string): DeliverableRun 
 	return report;
 }
 
-export function installResultDelivery(pi: ExtensionAPI, manager: WorkflowManager): void {
+export function installResultDelivery(pi: ExtensionAPI, manager: WorkflowManager, controlled: (runId: string) => boolean = () => false): void {
 	const m = holderOf(manager);
 
 	if (m.__deliveryInstalled) {
 		// Refresh the generation-bound dependency, leave registration alone.
-		if (m.__deliveryHolder) m.__deliveryHolder.pi = pi;
+		if (m.__deliveryHolder) { m.__deliveryHolder.pi = pi; m.__deliveryHolder.controlled = controlled; }
 		return;
 	}
 	m.__deliveryInstalled = true;
-	m.__deliveryHolder = { pi };
+	m.__deliveryHolder = { pi, controlled };
 
 	const deliver = (content: string): void => {
 		try {
@@ -92,11 +91,13 @@ export function installResultDelivery(pi: ExtensionAPI, manager: WorkflowManager
 	};
 
 	manager.on("complete", ({ runId }: { runId: string }) => {
+		if (m.__deliveryHolder?.controlled(runId)) return;
 		const report = takeRunReport(manager, runId);
 		if (report) deliver(report.text);
 	});
 
 	manager.on("error", ({ runId, error }: { runId: string; error?: string }) => {
+		if (m.__deliveryHolder?.controlled(runId)) return;
 		const report = takeRunReport(manager, runId);
 		// A failed run still has a full report — path, escalations, resume id —
 		// and that is exactly when it is most worth reading. Fall back to the
@@ -105,6 +106,7 @@ export function installResultDelivery(pi: ExtensionAPI, manager: WorkflowManager
 	});
 
 	manager.on("stopped", ({ runId }: { runId: string }) => {
+		if (m.__deliveryHolder?.controlled(runId)) return;
 		const report = takeRunReport(manager, runId);
 		deliver(
 			report?.text ??

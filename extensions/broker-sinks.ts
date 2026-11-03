@@ -17,11 +17,13 @@ import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { RequestBroker, PendingRequest, BrokerResult } from "./request-broker.ts";
 import { runAskUserQuestionTUI } from "./ask-user-question-tui.ts";
+import type { WorkflowController } from "./workflow-controller.ts";
 import { installRelayHookSink } from "./relay-hook.ts";
 
 export interface BrokerSinkOptions {
 	pi: ExtensionAPI;
 	broker: RequestBroker;
+	controller?: WorkflowController;
 }
 
 /**
@@ -38,7 +40,7 @@ export function installBrokerSinks(options: BrokerSinkOptions): void {
 		const supervisor = batch.filter((r) => r.kind === "supervisor");
 
 		if (human.length > 0) void handleHumanBatch(pi, broker, human);
-		if (supervisor.length > 0) void handleSupervisorBatch(pi, broker, supervisor);
+		if (supervisor.length > 0) void handleSupervisorBatch(pi, broker, supervisor, options.controller);
 	});
 
 	registerWorkflowReplyTool(pi, broker);
@@ -58,6 +60,7 @@ async function handleHumanBatch(
 	const ctx = getCurrentContext(pi);
 
 	for (const request of requests) {
+		if (!broker.hasPending(request.id)) continue;
 		if (!ctx?.hasUI || !ctx.ui) {
 			broker.cancel(request.id, "No UI available; the run has no interactive session.");
 			continue;
@@ -66,7 +69,7 @@ async function handleHumanBatch(
 		// 1. TUI Mode: Renders custom batch questionnaire dialog
 		if (ctx.mode === "tui") {
 			try {
-				const result = await runAskUserQuestionTUI(ctx, request.questions);
+				const result = await runAskUserQuestionTUI(ctx, request.questions, broker.signalFor(request.id));
 				if (result.cancelled) {
 					broker.cancel(request.id, "Dismissed by the user.");
 				} else {
@@ -156,16 +159,17 @@ async function handleHumanBatch(
  * merely displaying the message. The main agent answers by calling the
  * `workflow_reply` tool, which resolves the broker entry.
  *
- * This only works because the run is in the background: a blocked main agent
- * cannot take a turn. The broker's expiry (10 min) catches the case where the
- * main agent answers in prose instead of calling the tool.
+ * Controlled graphs deliver through their waiter/idle fallback instead. This
+ * sink remains for standalone subagents; inline claims prevent duplicate turns.
  */
 async function handleSupervisorBatch(
 	pi: ExtensionAPI,
 	broker: RequestBroker,
 	requests: PendingRequest[],
+	controller?: WorkflowController,
 ): Promise<void> {
 	for (const request of requests) {
+		if (!broker.hasPending(request.id)) continue;
 		if (!request.expectsReply) {
 			// Fire-and-forget progress update: deliver and resolve immediately.
 			try {
@@ -184,10 +188,11 @@ async function handleSupervisorBatch(
 		// Already embedded inline in the subagent tool result — the main agent
 		// already has the question and will call workflow_reply. Sending a second
 		// sendMessage would trigger a duplicate turn for the same request.
-		if (request.inlineDelivered) continue;
+		if (request.inlineDelivered || controller?.owns(request.runId)) continue;
 
 		const message = formatSupervisorQuestion(request);
 		try {
+			broker.markInlineDelivered(request.id);
 			pi.sendMessage(
 				{
 					customType: "workflow-agent-question",
@@ -200,7 +205,7 @@ async function handleSupervisorBatch(
 						agent: request.agent,
 					},
 				},
-				{ triggerTurn: true },
+				{ triggerTurn: true, deliverAs: "followUp" },
 			);
 		} catch {
 			// If sendMessage fails (stale ctx after /reload), the broker's
@@ -248,10 +253,12 @@ function registerWorkflowReplyTool(pi: ExtensionAPI, broker: RequestBroker): voi
 			}),
 			promptGuidelines: [
 				"MANDATORY: When you receive a [workflow-agent-question] custom message in the conversation, you MUST answer it by calling the workflow_reply tool with the requestId from that message and your answer. " +
-					"Do NOT reply in plain text or in thinking — the subagent is blocked and will time out after 10 minutes if you do not call the tool. " +
+					"Do NOT reply in plain text or in thinking — the subagent is blocked until you use workflow_reply. After replying to all requests, call workflow_wait for a graph workflow. " +
 					"The answer should be a direct, actionable response to the subagent's question.",
 			],
 			async execute(_id, params) {
+				const request = broker.listPending().find(r => r.id === params.requestId);
+				if (!request || request.kind !== "supervisor" || !request.expectsReply) throw new Error(`Supervisor request ${params.requestId} is no longer pending; no answer was delivered.`);
 				broker.resolve(params.requestId as string, {
 					source: "supervisor",
 					text: params.answer as string,
@@ -261,7 +268,7 @@ function registerWorkflowReplyTool(pi: ExtensionAPI, broker: RequestBroker): voi
 					content: [
 						{
 							type: "text" as const,
-							text: `Answer delivered to the requesting agent: "${params.answer}"`,
+							text: `Answer delivered to the requesting agent: "${params.answer}"\nIf other requests are pending, answer them first. Then immediately call workflow_wait({ runId: "${request.runId}" }) for a controlled workflow; for a standalone subagent use subagent_wait.`,
 						},
 					],
 					details: { delivered: true, requestId: params.requestId },
@@ -305,7 +312,7 @@ function formatSupervisorQuestion(request: PendingRequest): string {
 		"",
 		`**Mandatory action required:** ${who} is blocked waiting for your answer via \`ask_supervisor\`.`,
 		"",
-		`You MUST call the \`workflow_reply\` tool with exactly:\n  requestId: "${request.id}"\n  answer: "<your answer>"\nDo NOT reply in plain text — the subagent is blocked and will time out after 10 minutes if you do not use the tool.`,
+		`You MUST call the \`workflow_reply\` tool with exactly:\n  requestId: "${request.id}"\n  answer: "<your answer>"\nDo NOT reply in plain text — the subagent is blocked waiting for workflow_reply.`,
 		"",
 		`Question: ${question}`,
 	].join("\n");
