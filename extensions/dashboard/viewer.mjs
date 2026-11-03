@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { kittyUpload, kittyPlace, kittyDelete, kittyProbeSequence, probeReplyPattern,
-  CELL_SIZE_QUERY, renderGraphPng, layoutGraph, statusInfo } from './graphics.mjs';
+  CELL_SIZE_QUERY, renderGraphPng, graphGeometry, statusInfo } from './graphics.mjs';
 import { color, fg, palette, fit, safeText, renderMarkdown } from './markdown.mjs';
 
 const CSI='\x1b[';
@@ -105,28 +105,29 @@ export function draw(snapshot,state,width,height,elapsed,cellRatio=.5) {
       const duration=item.durationMs/1000;
       put(rx,6,color('muted',`${safeText(item.status)} · ${item.totalTokens.toLocaleString()} tokens · ${duration.toFixed(1)}s · ${nodes.length} nodes`),rw);
       const gx=rx,gy=8,gw=rw,gh=Math.max(7,height-19);
-      // Match image aspect to terminal cells; cap raster dimensions/bandwidth.
-      const ratio=gw*cellRatio/gh;
-      const ph=Math.min(350,Math.max(100,Math.round(650/ratio)));
-      const pw=Math.max(120,Math.min(760,Math.round(ph*ratio)));
-      graph={x:gx,y:gy,w:gw,h:gh,nodes:displayNodes,edges,width:pw,height:ph,time:elapsed};
-      const {positions}=layoutGraph(nodes,edges);
-      const mx=Math.max(26,Math.floor(pw*.09)),my=Math.max(26,Math.floor(ph*.1));
-      for(const p of positions) {
-        const n=nodes[p.index];
-        const x=Math.round((mx+p.x*(pw-2*mx))/pw*gw);
-        const y=Math.round((my+p.y*(ph-2*my))/ph*gh);
-        const label=`${p.index===state.node?'▸':'○'} ${p.index+1} ${safeText(n.label)}${n.visits>1?` ×${n.visits}`:''}`;
-        const lx=Math.max(rx,Math.min(rx+rw-18,gx+x-4)),ly=Math.min(gy+gh-1,gy+y+1);
-        put(lx,ly,fg(statusInfo(n.status).rgb,label),Math.min(24,rx+rw-lx));
-        state.hits.push({x:gx+x-3,y:gy+y-1,w:Math.min(24,label.length+5),h:3,action:()=>{state.node=p.index;}});
+      const geometry=graphGeometry(nodes,edges,gw,gh,cellRatio);
+      graph={x:gx,y:gy,w:gw,h:gh,nodes:displayNodes,edges,width:geometry.width,height:geometry.height,time:elapsed,geometry,selected:state.node};
+      for(const card of geometry.cards) {
+        const n=displayNodes[card.index],info=statusInfo(n.status);
+        const lx=gx+card.x+1,ly=gy+card.y;
+        const labelWidth=Math.max(1,card.w-2);
+        const type=n.nodeType==='command'?'⌘ CMD':n.nodeType==='human'?'◇ HUMAN':n.nodeType==='fn'?'ƒ FUNCTION':n.id==='END'?'◆ END':'◈ AGENT';
+        if(card.h>=4)put(lx,ly+1,color('muted',`${String(card.index+1).padStart(2,'0')} ${type}`),labelWidth);
+        put(lx,ly+(card.h>=4?2:0),color(card.index===state.node?'purple':'text',safeText(n.label)),labelWidth);
+        if(card.h>=3)put(lx,ly+card.h-1,fg(info.rgb,`${info.glyph} ${info.label}${n.visits>1?` ×${n.visits}`:''}`),labelWidth);
+        state.hits.push({x:gx+card.x,y:gy+card.y,w:card.w,h:card.h,action:()=>{state.node=card.index;}});
       }
       state.node=Math.max(0,Math.min(nodes.length-1,state.node));
       const node=nodes[state.node];
       const detailY=gy+gh+1;
       put(rx,detailY,color('purple',node?`NODE ${state.node+1}/${nodes.length} · ${safeText(node.label)} · ${safeText(node.status)}`:'No nodes yet'),rw);
       if(node) put(rx,detailY+1,color('text',safeText(node.preview||`${node.visits} visit(s) · ${node.nodeType??'agent'}`).replace(/\n/g,' ')),rw);
-      put(rx,detailY+3,color('muted','Edges: declared direct routes + observed selections; no invented links.'),rw);
+      const done=nodes.filter(n=>['done','cached','completed'].includes(n.status)).length;
+      const active=displayNodes.filter(n=>n.status==='running').length;
+      const waiting=displayNodes.filter(n=>n.status==='waiting').length;
+      const barWidth=Math.max(4,rw-29),filled=Math.round(barWidth*done/Math.max(1,nodes.length));
+      put(rx,detailY+2,color('green','━'.repeat(filled))+color('border','━'.repeat(barWidth-filled))+color('muted',`  ${done}/${nodes.length} settled · ${active} active`),rw);
+      put(rx,detailY+3,color('cyan',`● running  `)+color('green','✓ done  ')+color('amber',`◇ waiting ${waiting}  `)+color('muted','dim = unvisited route'),rw);
       for(let j=0;j<2;j++)put(rx,detailY+4+j,color('muted',safeText(item.logs?.slice(-2)[j]??'').replace(/\n/g,' ')),rw);
     } else {
       put(rx,6,color('muted',state.tab===2?`${safeText(item.type)} · ${safeText(item.status)} · ${safeText(item.producer)} → ${safeText(item.consumer)}`:`Updated ${safeText(item.updatedAt)}`),rw);
@@ -229,7 +230,7 @@ export async function runViewer(file) {
         let output=view.text;
         if(view.graph) {
           const g=view.graph,current=id+(frame++%2);
-          const png=renderGraphPng(g.nodes,g.edges,g.width,g.height,g.time);
+          const png=renderGraphPng(g.nodes,g.edges,g.width,g.height,g.time,{geometry:g.geometry,selected:g.selected});
           // Upload/place first, then delete old frame. At most two owned images.
           output+=kittyUpload(png.toString('base64'),current)+`${CSI}${g.y+1};${g.x+1}H`+kittyPlace(current,g.w,g.h);
           if(previous!==null)output+=kittyDelete(previous);

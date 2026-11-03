@@ -874,8 +874,10 @@ without being forced to read them.
 Run **`/workspace-dashboard`** explicitly from an interactive Pi session inside a Herdr pane.
 It opens a new **Herdr tab** with three read-only sections:
 
-- **Workflows:** actual execution state, smooth Kitty PNG graphics, directed edges, active-node pulses,
-  observed-route animation, visit counts, token/time metrics, and node previews.
+- **Workflows:** actual execution state, smooth Kitty PNG graphics, rounded status cards, curved directed
+  routes with moving packet trails, active-port pulses, selected-node accents, visit counts,
+  completion bar, token/time metrics, and node previews. Responsive layered layout groups retries
+  and adapts between horizontal and vertical flow.
 - **Plans:** searchable titles and rendered Markdown with headings, lists, tables, checkboxes, and highlighted code.
 - **Contracts:** the same document reader, with type/status and producer/consumer metadata separated from frontmatter.
 

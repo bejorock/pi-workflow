@@ -11,7 +11,7 @@ import { dashboardLaunchParams, registerWorkspaceDashboard } from "../extensions
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 // Standalone viewer modules intentionally ship as plain JavaScript.
 // @ts-ignore
-import { renderGraphPng, layoutGraph, kittyUpload, kittyDelete, isActiveStatus, probeReplyPattern } from "../extensions/dashboard/graphics.mjs";
+import { renderGraphPng, layoutGraph, kittyUpload, kittyDelete, isActiveStatus, probeReplyPattern, graphGeometry } from "../extensions/dashboard/graphics.mjs";
 // @ts-ignore
 import { draw, createViewState, decodeInput, stale, filtered } from "../extensions/dashboard/viewer.mjs";
 // @ts-ignore
@@ -95,6 +95,34 @@ describe("standalone terminal rendering",()=>{
   const layout=layoutGraph(nodes,[{from:"a",to:"b"},{from:"b",to:"a"}]);
   expect(new Set(layout.positions.map((p:any)=>`${p.x},${p.y}`)).size).toBe(3);
   expect(layout.edgePairs).toHaveLength(2);
+ });
+ it("keeps card geometry bounded and nonoverlapping across responsive layouts",()=>{
+  const nodes=["start","a","b","join","finish","END"].map(id=>({id}));
+  const edges=[["start","a"],["start","b"],["a","join"],["b","join"],["join","finish"],["finish","END"]].map(([from,to])=>({from,to}));
+  for(const [columns,rows] of [[110,28],[57,15],[70,54]]) {
+   const geometry=graphGeometry(nodes,edges,columns,rows,.5);
+   for(const card of geometry.cards) {
+    expect(card.x).toBeGreaterThanOrEqual(0);expect(card.y).toBeGreaterThanOrEqual(0);
+    expect(card.x+card.w).toBeLessThanOrEqual(columns);expect(card.y+card.h).toBeLessThanOrEqual(rows);
+   }
+   const cards=geometry.cards;
+   for(let i=0;i<cards.length;i++)for(let j=i+1;j<cards.length;j++) {
+    const a=cards[i],b=cards[j];
+    expect(a.x+a.w<=b.x||b.x+b.w<=a.x||a.y+a.h<=b.y||b.y+b.h<=a.y).toBe(true);
+   }
+   expect(geometry.width/geometry.height).toBeCloseTo(columns*.5/rows,2);
+  }
+ });
+ it("keeps settled frames still, distinguishes selected nodes, and preserves loop components",()=>{
+  const nodes=[{id:"a",status:"done"},{id:"b",status:"done"},{id:"c",status:"queued"}];
+  const edges=[{from:"a",to:"b",observed:true},{from:"b",to:"a",observed:true},{from:"b",to:"c"}];
+  const geometry=graphGeometry(nodes,edges,100,28,.5);
+  const first=renderGraphPng(nodes,edges,400,224,0,{geometry,selected:0});
+  expect(renderGraphPng(nodes,edges,400,224,3,{geometry,selected:0}).equals(first)).toBe(true);
+  expect(renderGraphPng(nodes,edges,400,224,0,{geometry,selected:1}).equals(first)).toBe(false);
+  const layout=layoutGraph(nodes,edges);
+  expect(layout.positions.find((p:any)=>p.id==="a").x).toBe(layout.positions.find((p:any)=>p.id==="b").x);
+  expect(layout.positions.find((p:any)=>p.id==="c").x).toBeGreaterThan(layout.positions.find((p:any)=>p.id==="b").x);
  });
  it("renders Markdown, sanitizes terminal controls, and decodes split mouse packets",()=>{
   const source="---\nstatus: proposed\n---\n# Title\n\n**Bold** and `code`\n\n```js\nconst x = 1;\n```\n\n| A | B |\n|---|---|\n| one | two |\n\n- [x] done";
