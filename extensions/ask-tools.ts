@@ -17,18 +17,19 @@ import {
 } from "./ask-user-question-tui.ts";
 import { ChannelClient } from "./channel.ts";
 import type { RequestBroker } from "./request-broker.ts";
+import { QUESTION_LIMITS } from "./question-limits.ts";
 
 // ── Schemas ──────────────────────────────────────────────────────────────
 
 const TUIOptionSchema = Type.Object({
-	label: Type.String({ description: "Display label for the option, max 60 chars" }),
-	description: Type.Optional(Type.String({ description: "Optional description of trade-offs" })),
+	label: Type.String({ maxLength: QUESTION_LIMITS.label, description: "Concise option label, ideally 1–5 words; max 60 characters" }),
+	description: Type.Optional(Type.String({ maxLength: QUESTION_LIMITS.description, description: "Short trade-off summary, max 160 characters; use preview for details" })),
 	preview: Type.Optional(Type.String({ description: "Markdown preview text shown beside/below options" })),
 });
 
 const TUIQuestionSchema = Type.Object({
-	question: Type.String({ description: "The full question text to display, ending with ?" }),
-	header: Type.String({ description: "Short tab label, max 16 chars" }),
+	question: Type.String({ maxLength: QUESTION_LIMITS.question, description: "Clear question ending with ?, max 240 characters; keep background in previews or documents" }),
+	header: Type.String({ maxLength: QUESTION_LIMITS.header, description: "Short topic label, max 12 characters (e.g. Auth method)" }),
 	options: Type.Optional(Type.Array(TUIOptionSchema, { description: "Options to choose from" })),
 	multiSelect: Type.Optional(Type.Boolean({ description: "Allow multiple selections" })),
 });
@@ -92,6 +93,16 @@ export function createAskUserQuestionTool(broker?: RequestBroker): ToolDefinitio
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			const questions = params.questions as TUIQuestion[];
 
+			// Validate before child IPC as well as direct parent presentation.
+			const validationError = validateQuestions(questions);
+			if (validationError) {
+				return {
+					isError: true,
+					content: [{ type: "text" as const, text: `Validation failed: ${validationError}` }],
+					details: { answers: [], cancelled: false, error: validationError },
+				};
+			}
+
 			// 1. Child process check
 			const client = ChannelClient.fromEnv();
 			if (client) {
@@ -122,15 +133,6 @@ export function createAskUserQuestionTool(broker?: RequestBroker): ToolDefinitio
 						cancelled,
 						error: reply.source === "timeout" ? "timeout" : undefined,
 					},
-				};
-			}
-
-			// 2. Parent process: validation first
-			const validationError = validateQuestions(questions);
-			if (validationError) {
-				return {
-					content: [{ type: "text" as const, text: `Validation failed: ${validationError}` }],
-					details: { answers: [], cancelled: false, error: validationError },
 				};
 			}
 

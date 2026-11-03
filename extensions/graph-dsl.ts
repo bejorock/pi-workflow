@@ -13,6 +13,8 @@
  * consumes what `buildGraphFromScript` returns.
  */
 
+import { questionLengthError } from "./question-limits.ts";
+
 /** Terminal target for an edge. Reaching it ends the run. */
 export const END: unique symbol = Symbol("END");
 export type EndSymbol = typeof END;
@@ -253,6 +255,8 @@ export function human(prompt: string | PromptFn, options: HumanNodeOptions = {})
 			throw new GraphDefinitionError("human() options must all be strings");
 		}
 	}
+	const lengthError = questionLengthError([{ question: typeof prompt === "string" ? prompt : "", header: "", options: options.options?.map(label => ({ label })) }]);
+	if (lengthError) throw new GraphDefinitionError(`human(): ${lengthError}`);
 	if (options.default !== undefined && typeof options.default !== "string") {
 		throw new GraphDefinitionError("human() default must be a string");
 	}

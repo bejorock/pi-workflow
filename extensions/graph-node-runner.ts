@@ -32,6 +32,7 @@ import {
 	resolveCurrentMaxSubagentDepth,
 } from "./types.ts";
 import { getFinalOutput } from "./utils.ts";
+import { questionLengthError, questionHeader } from "./question-limits.ts";
 
 /**
  * Structured view of an agent's reply, after escalation parsing.
@@ -376,6 +377,8 @@ export function createNodeRunner(options: CreateNodeRunnerOptions): NodeRunner {
 			case "human": {
 				const def = node.def;
 				const prompt = def.promptFn(state);
+				const lengthError = questionLengthError([{ question: prompt, header: "", options: def.options?.map(label => ({ label })) }]);
+				if (lengthError) return { result: null, technicalFailure: true, error: `human() node "${node.id}": ${lengthError}` };
 
 				// Prepare artifact preview if requested
 				let artifactPreview: string | undefined;
@@ -430,7 +433,7 @@ export function createNodeRunner(options: CreateNodeRunnerOptions): NodeRunner {
 						questions: [
 							{
 								question: prompt,
-								header: node.id,
+								header: questionHeader(node.id),
 								options: optionsList,
 							},
 						],

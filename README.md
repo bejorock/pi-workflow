@@ -869,6 +869,25 @@ without being forced to read them.
 | `/agents` | Show the discovered agent roster |
 | `/saved-workflows` | List or delete saved workflow scripts |
 
+### Concise human questions
+
+Human-facing prompts are bounded in both `ask_user_question` and workflow `human()` nodes:
+
+| Field | Maximum characters |
+|---|---:|
+| Question / expanded `human()` prompt | 240 |
+| Tab header | 12 |
+| Option label | 60 (prefer 1–5 words) |
+| Option description | 160 |
+
+The 12-character header follows [Claude's documented AskUserQuestion format](https://code.claude.com/docs/en/agent-sdk/user-input).
+Claude does not publish question/description character caps; those are pi-workflow's own readability limits.
+Overlong questions, labels, and descriptions are **rejected**, not silently truncated, so option values and
+workflow routing remain unchanged. Generated `human()` headers use the first 12 characters of the node ID;
+the full node identity is preserved internally. Dynamic prompts are checked **after expansion**.
+Use option Markdown previews or `human(..., { artifacts: ['plan', 'contract'] })` for detailed context.
+These caps do not apply to previews, user-written answers, or `ask_supervisor` coordination.
+
 ### Optional graphical workspace dashboard
 
 Run **`/workspace-dashboard`** explicitly from an interactive Pi session inside a Herdr pane.

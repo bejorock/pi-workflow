@@ -217,6 +217,13 @@ g.edge('green', (state, result) => {
 Cycles are allowed and are how escalation works. A run stops at `maxIterations` (default 45) if a
 loop never resolves.
 
+### Human-facing text limits
+
+Keep `human()` prompts (including expanded state interpolation) and `ask_user_question` questions at most
+**240 characters**, tab headers **12**, option labels **60** (prefer 1–5 words), and option descriptions
+**160**. Overlong inputs are rejected rather than truncated. Put long context in option previews or plan/contract
+artifacts, not the question or label. These limits do not apply to `ask_supervisor` or user answers.
+
 ### Interactive Gates vs. In-Flight Tools
 
 Workflows support two distinct ways to bring external judgment or decisions into a run:

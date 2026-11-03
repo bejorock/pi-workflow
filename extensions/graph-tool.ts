@@ -204,7 +204,7 @@ export function createGraphWorkflowTool(options: GraphToolOptions = {}): ToolDef
 			"For workflow, agent results carry { status, text, blockedOn, reason } — status is 'blocked' when the agent escalated. Interpolating a result into a prompt yields its text.",
 			"For workflow, prefer routing a blocked agent back to whoever owns the problem (contract issues to the designer, test issues to whoever wrote them) rather than retrying the same node.",
 			"For workflow, cycles are allowed and are how escalation works; the run stops at maxIterations if a loop never resolves.",
-			"For workflow, use human(prompt, { options, default }) to ask the user. Always give human() a default so a headless run cannot hang.",
+			"For workflow, use human(prompt, { options, default }) to ask the user. Keep the expanded prompt <=240 characters and each option <=60 characters (ideally 1–5 words); put long context in plans/contracts via artifacts, not the prompt. Always give human() a default so a headless run cannot hang.",
 		],
 		parameters: GraphToolParams,
 

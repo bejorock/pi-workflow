@@ -25,6 +25,8 @@ import {
 } from "@earendil-works/pi-tui";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
+import { questionLengthError } from "./question-limits.ts";
+
 // ── Types ───────────────────────────────────────────────────────────────
 
 export interface TUIOption {
@@ -58,7 +60,8 @@ export interface TUIResult {
 		| "duplicate_question"
 		| "duplicate_option_label"
 		| "reserved_label"
-		| "empty_options";
+		| "empty_options"
+		| `Question ${string}`;
 }
 
 // Reserved labels (case-insensitive checks)
@@ -78,6 +81,9 @@ export function validateQuestions(questions: TUIQuestion[]): TUIResult["error"] 
 	if (questions.length > 4) {
 		return "too_many_questions";
 	}
+
+	const lengthError = questionLengthError(questions);
+	if (lengthError) return lengthError as `Question ${string}`;
 
 	const seenQuestions = new Set<string>();
 	for (const q of questions) {

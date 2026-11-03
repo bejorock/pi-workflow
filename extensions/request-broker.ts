@@ -25,6 +25,8 @@
  *    cancelled; the rest of the queue is untouched.
  */
 
+import { questionLengthError } from "./question-limits.ts";
+
 /** A single question, in the rpiv-ask-user-question schema. */
 export interface BrokerQuestion {
 	question: string;
@@ -135,6 +137,10 @@ export class RequestBroker {
 	 */
 	ask(request: Omit<PendingRequest, "id" | "createdAt" | "expiresAt"> & { id?: string }): Promise<BrokerResult> {
 		const id = request.id ?? `req-${++this.nextId}`;
+		if (request.kind === "human") {
+			const error = questionLengthError(request.questions);
+			if (error) return Promise.resolve({ requestId: id, source: "cancelled", reason: error });
+		}
 		const createdAt = Date.now();
 		const expiresAt =
 			request.kind === "supervisor" && request.expectsReply
