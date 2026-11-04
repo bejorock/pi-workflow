@@ -927,7 +927,9 @@ It opens a new **Herdr tab** with three read-only sections:
 **Requirements:** Linux/macOS, a Herdr server supporting `layout.apply` with argv-backed panes,
 Node (already used by Pi), and a terminal/Herdr client path that acknowledges Kitty graphics.
 The viewer probes support inside its own PTY. Unsupported paths show an explanation; there is no silent
-text-only fallback. No additional packages or shell configuration are required. A particular shell is
+text-only fallback. Managed git/npm installations resolve Pi UI peers from the launching Pi installation
+(they do not need their own copies of Pi). Early startup/import failures stay visible until dismissed,
+rather than making the Herdr tab disappear. No additional packages or shell configuration are required. A particular shell is
 not required: Herdr launches Node directly, without shell command interpolation.
 
 **Controls:** `1`/`2`/`3` or click tabs; up/down select an item; left/right select a workflow node;

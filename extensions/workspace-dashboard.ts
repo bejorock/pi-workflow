@@ -6,14 +6,16 @@ import * as path from "node:path";
 import * as net from "node:net";
 import { fileURLToPath } from "node:url";
 import { DashboardProjector } from "./dashboard-state.ts";
+import { resolvePiPackageRoot, resolveInstalledPiPackageRoot, PI_CODING_AGENT_PACKAGE_ROOT_ENV } from "./pi-spawn.ts";
 import type { WorkflowManager } from "./workflow-manager.ts";
 
 /** Herdr argv-backed launch avoids shell quoting and shell-specific startup files. */
-export function dashboardLaunchParams(cwd: string, snapshotPath: string, workspaceId: string) {
+export function dashboardLaunchParams(cwd: string, snapshotPath: string, workspaceId: string, piRoot?: string) {
 	return {
 		workspace_id: workspaceId, tab_label: "Pi Workspace", focus: true,
 		root: { type: "pane", label: "Pi Workspace Dashboard", cwd,
-			command: [process.execPath, fileURLToPath(new URL("./dashboard/viewer.mjs", import.meta.url)), "--snapshot", snapshotPath] },
+			env: piRoot ? { [PI_CODING_AGENT_PACKAGE_ROOT_ENV]: piRoot } : {},
+			command: [process.execPath, fileURLToPath(new URL("./dashboard/launch.mjs", import.meta.url)), "--snapshot", snapshotPath] },
 	};
 }
 
@@ -96,7 +98,11 @@ export function registerWorkspaceDashboard(pi: ExtensionAPI, manager: WorkflowMa
 				}
 				const socket = process.env.HERDR_SOCKET_PATH;
 				if (!socket) throw new Error("HERDR_SOCKET_PATH is missing; refusing to target an unrelated default Herdr session.");
-				await herdrRequest(socket, "layout.apply", dashboardLaunchParams(ctx.cwd, active.file, process.env.HERDR_WORKSPACE_ID));
+				let piRoot = resolvePiPackageRoot();
+				if (!piRoot) {
+					try { piRoot = resolveInstalledPiPackageRoot(); } catch { /* Local viewer resolution or bootstrap diagnostics remain available. */ }
+				}
+				await herdrRequest(socket, "layout.apply", dashboardLaunchParams(ctx.cwd, active.file, process.env.HERDR_WORKSPACE_ID, piRoot));
 				ctx.ui.notify("Opened Pi Workspace in a Herdr tab. The viewer checks Kitty graphics support there.", "info");
 			} catch (error) {
 				stop();

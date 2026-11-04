@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { inflateSync } from "node:zlib";
 import * as net from "node:net";
+import { spawnSync } from "node:child_process";
 import { DashboardProjector } from "../extensions/dashboard-state.ts";
 import { WorkflowManager } from "../extensions/workflow-manager.ts";
 import { GraphDisplayBridge } from "../extensions/graph-display-bridge.ts";
@@ -176,6 +177,29 @@ describe("standalone terminal rendering",()=>{
  });
 });
 
+describe("managed standalone installation",()=>{
+ it("loads viewer from an isolated checkout using host-provided peers",()=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),"pi-dashboard-installed-"));
+  try {
+   const target=path.join(dir,"dashboard");fs.cpSync(path.resolve("extensions/dashboard"),target,{recursive:true});
+   const host=path.resolve("node_modules/@earendil-works/pi-coding-agent");
+   const result=spawnSync(process.execPath,[path.join(target,"viewer.mjs")],{encoding:"utf8",env:{...process.env,PI_CODING_AGENT_PACKAGE_ROOT:host}});
+   expect(result.stderr).toContain("Usage: node viewer.mjs");
+   expect(result.stderr).not.toContain("ERR_MODULE_NOT_FOUND");
+  }finally{fs.rmSync(dir,{recursive:true,force:true});}
+ });
+ it("bootstrap catches dependency-link failures before viewer execution",()=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),"pi-dashboard-broken-"));
+  try {
+   fs.cpSync(path.resolve("extensions/dashboard"),path.join(dir,"dashboard"),{recursive:true});
+   const result=spawnSync(process.execPath,[path.join(dir,"dashboard/launch.mjs"),"--snapshot","/unused"],{encoding:"utf8",env:{...process.env,PI_CODING_AGENT_PACKAGE_ROOT:"/nonexistent-host",PI_DASHBOARD_EXIT_ON_ERROR:"1"}});
+   expect(result.status).toBe(1);
+   expect(result.stderr).toContain("Dashboard startup failed:");
+   expect(result.stderr).toContain("Cannot resolve @earendil-works/pi-tui");
+  }finally{fs.rmSync(dir,{recursive:true,force:true});}
+ });
+});
+
 describe("dashboard command",()=>{
  it("registers command only, and rejects noninteractive use without launching",async()=>{
   let command:any;
@@ -211,9 +235,10 @@ describe("dashboard command",()=>{
   }
  });
  it("launches argv directly, not a shell or relay",()=>{
-  const params=dashboardLaunchParams("/tmp/a 'quoted'", "/tmp/private/snapshot.json","w5");
+  const params=dashboardLaunchParams("/tmp/a 'quoted'", "/tmp/private/snapshot.json","w5", "/host/pi");
+  expect(params.root.env).toEqual({ PI_CODING_AGENT_PACKAGE_ROOT: "/host/pi" });
   expect(params.root.command[0]).toBe(process.execPath);
-  expect(params.root.command[1]).toMatch(/dashboard\/viewer.mjs$/);
+  expect(params.root.command[1]).toMatch(/dashboard\/launch.mjs$/);
   expect(params.root.command.slice(-2)).toEqual(["--snapshot","/tmp/private/snapshot.json"]);
   expect(params).toMatchObject({workspace_id:"w5",focus:true,root:{type:"pane",cwd:"/tmp/a 'quoted'"}});
  });

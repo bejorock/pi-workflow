@@ -1,5 +1,6 @@
-import { Markdown, truncateToWidth, visibleWidth } from '@earendil-works/pi-tui';
-import { highlightCode, initTheme } from '@earendil-works/pi-coding-agent';
+import { loadRuntimePeer } from './runtime.mjs';
+const { Markdown, truncateToWidth, visibleWidth } = await loadRuntimePeer('@earendil-works/pi-tui');
+const { highlightCode, initTheme } = await loadRuntimePeer('@earendil-works/pi-coding-agent');
 
 export const palette = { bg: [13,16,26], text: [215,226,240], muted: [112,135,158],
   cyan: [80,220,240], purple: [178,143,255], green: [95,205,140], amber: [232,182,82], border: [44,61,82] };

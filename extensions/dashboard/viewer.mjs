@@ -2,7 +2,8 @@
 /** Standalone, read-only PTY viewer. Started only by /workspace-dashboard. */
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { sliceByColumn } from '@earendil-works/pi-tui';
+import { loadRuntimePeer } from './runtime.mjs';
+const { sliceByColumn } = await loadRuntimePeer('@earendil-works/pi-tui');
 import { kittyUpload, kittyPlace, kittyDelete, kittyProbeSequence, probeReplyPattern,
   CELL_SIZE_QUERY, renderGraphPng, graphGeometry, statusInfo } from './graphics.mjs';
 import { color, fg, palette, fit, safeText, renderMarkdown } from './markdown.mjs';
