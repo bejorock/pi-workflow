@@ -150,17 +150,15 @@ describe("createNodeRunner: command nodes", () => {
 		return { id, def };
 	}
 
-	it("keeps timers and live dashboard snapshots responsive while a command runs", async () => {
+	it("keeps timers and live run state responsive while a command runs", async () => {
 		const { WorkflowManager } = await import("../extensions/workflow-manager.ts");
-		const { DashboardProjector } = await import("../extensions/dashboard-state.ts");
 		const manager = new WorkflowManager();
 		manager.registerRun("live", { name: "live" }, undefined, { cwd });
-		const projector = new DashboardProjector(manager, cwd);
 		let finished = false;
 		const pending = runnerWith()(commandNode("test", command("sleep 0.3")), {}, { step: 1, runId: "r1" })
 			.then(result => { finished = true; return result; });
 		const whileRunning = await new Promise<boolean>(resolve => setTimeout(() => {
-			resolve(!finished && projector.snapshot().runs.some(r => r.runId === "live" && r.status === "running"));
+			resolve(!finished && manager.getRun("live")?.status === "running");
 		}, 25));
 		await pending;
 		expect(whileRunning).toBe(true);
@@ -453,11 +451,9 @@ describe("command node in full graph walk", () => {
 	it("publishes real parallel running nodes before the fan-in completes", async () => {
 		const { WorkflowManager } = await import("../extensions/workflow-manager.ts");
 		const { GraphDisplayBridge } = await import("../extensions/graph-display-bridge.ts");
-		const { DashboardProjector } = await import("../extensions/dashboard-state.ts");
 		const cwd = process.cwd();
 		const manager = new WorkflowManager();
 		const display = new GraphDisplayBridge({ manager, runId: "responsive-wave", name: "responsive-wave", description: "", cwd, script: "test" });
-		const projector = new DashboardProjector(manager, cwd);
 		const g = createGraphFactory().graph();
 		g.node("start", command("printf ready"));
 		g.node("a", command("sleep 0.35"));
@@ -467,8 +463,8 @@ describe("command node in full graph walk", () => {
 		g.edge("a", "join"); g.edge("b", "join"); g.edge("join", END); g.run({});
 		const samples: string[][] = [];
 		const timer = setInterval(() => {
-			const run = projector.snapshot().runs.find(r => r.runId === "responsive-wave");
-			samples.push(run?.nodes.filter(n => n.status === "running").map(n => n.id) ?? []);
+			const run = manager.getRun("responsive-wave");
+			samples.push(run?.snapshot.agents.filter(a => a.status === "running").map(a => a.label) ?? []);
 		}, 20);
 		try {
 			const result = await runSuperstepGraph(g.build(), {
@@ -478,7 +474,7 @@ describe("command node in full graph walk", () => {
 				onNodeComplete: execution => display.nodeCompleted(execution),
 			});
 			expect(result.status).toBe("completed");
-			expect(samples.some(ids => ids.includes("a") && ids.includes("b"))).toBe(true);
+			expect(samples.some(labels => labels.includes("a [command]") && labels.includes("b [command]"))).toBe(true);
 		} finally { clearInterval(timer); }
 	});
 	it("worker → test: agent receives the command's output as state", async () => {

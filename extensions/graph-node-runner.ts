@@ -541,7 +541,7 @@ export function createNodeRunner(options: CreateNodeRunnerOptions): NodeRunner {
 			commandString = def.command;
 		}
 
-		// Await asynchronous child I/O so Pi input, dashboard heartbeats, and
+		// Await asynchronous child I/O so Pi input, live run updates, and
 		// other nodes in the same parallel wave remain responsive.
 		const spawnResult = await runCommandProcess(commandString, {
 			cwd, env, timeout, signal, maxBuffer: COMMAND_NODE_MAX_OUTPUT_BYTES,

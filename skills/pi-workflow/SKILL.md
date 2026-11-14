@@ -42,7 +42,7 @@ subagent(tasks=[{"agent": "scout", "task": "Review auth module"}, {"agent": "sco
 
 Every `workflow()` call **waits automatically** for completion or supervisor attention; there is no
 start-and-return background-only mode. The underlying engine still runs independently so UI widgets,
-events, human questions, and the dashboard keep updating. Only **one active graph workflow** is allowed
+events and human questions keep updating. Only **one active graph workflow** is allowed
 per Pi session, including paused runs and runs waiting for a human/supervisor. A legacy duplicate-run
 flag cannot bypass this cap. Do not start a second workflow while one is active.
 
@@ -165,7 +165,7 @@ g.node('check',    (state) => plan.get('sprint-plan').ok ? 'found' : 'missing');
 
 **Command nodes — a shell command, no LLM.** `command(cmdString, options)` runs a real
 shell command with no agent involved. The graph awaits its result, but execution is asynchronous
-so Pi input, live dashboards, and parallel command nodes remain responsive. Use it for deterministic, mechanical checks
+so Pi input, live run state, and parallel command nodes remain responsive. Use it for deterministic, mechanical checks
 that don't need judgement — `npm test`, a linter, a build step:
 
 ```js

@@ -52,7 +52,6 @@ import { WorkflowManager } from "./workflow-manager.ts";
 import { openWorkflowNavigator } from "./workflow-ui.ts";
 import { registerTaskPanel } from "./task-panel.ts";
 import { WorkflowController, SupervisorReminders, createWorkflowWaitTool } from "./workflow-controller.ts";
-import { registerWorkspaceDashboard } from "./workspace-dashboard.ts";
 import { registerWorkflowMode } from "./workflow-mode.ts";
 import { registerBlankStopGuard } from "./blank-stop-guard.ts";
 import { registerBashTimeoutGuard } from "./bash-timeout-guard.ts";
@@ -1318,7 +1317,6 @@ export default function (pi: ExtensionAPI) {
 	};
 
 	// --- Commands ---
-	registerWorkspaceDashboard(pi, globalWorkflowManager);
 	pi.registerCommand("workflows", {
 		description: "Open the interactive /workflows navigator overlay",
 		handler: async (_args, ctx) => {

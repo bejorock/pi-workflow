@@ -205,7 +205,7 @@ g.node('label', (state) => `processing task: ${state.planner}`);
 
 **Command nodes** run a real shell command — no LLM or agent wrapper, just the command itself.
 The graph waits for its result, but subprocess execution is asynchronous: Pi stays interactive,
-the dashboard refreshes live, and commands in a parallel wave overlap. Timeout or cancellation
+live run state remains responsive, and commands in a parallel wave overlap. Timeout or cancellation
 terminates the command's process group on Linux/macOS. Use command nodes for deterministic checks
 that don't need judgement: `npm test`, a linter, a build step.
 
@@ -862,7 +862,6 @@ without being forced to read them.
 | Command | Purpose |
 |---|---|
 | `/workflows` | Interactive TUI navigator: runs → phases → nodes → detail |
-| `/workspace-dashboard` | Optional Kitty graphics viewer in a new Herdr tab: workflows, plans, contracts |
 | `/plans` | Interactive TUI navigator: browse and read plans in `.pi-workflow/plans/` |
 | `/contracts` | Interactive TUI navigator: browse contracts with type/status colour coding |
 | `/wf normal\|plan\|workflow` | Switch execution mode (Normal, Plan, or Workflow) |
@@ -872,7 +871,7 @@ without being forced to read them.
 ### Foreground controller over background execution
 
 Every `workflow()` call now waits for the run's final report **or supervisor attention**. The graph
-executor remains independently scheduled, so the dashboard, widgets, events, and human dialogs work
+executor remains independently scheduled, so widgets, events, and human dialogs work
 while the tool is pending. There is no background-only flag. Only **one active graph workflow** per Pi
 session is permitted, including paused runs and runs awaiting answers; the slot is released after
 execution settles. This does not cap the workflow's internal parallel branches or ordinary subagents.
@@ -911,45 +910,6 @@ workflow routing remain unchanged. Generated `human()` headers use the first 12 
 the full node identity is preserved internally. Dynamic prompts are checked **after expansion**.
 Use option Markdown previews or `human(..., { artifacts: ['plan', 'contract'] })` for detailed context.
 These caps do not apply to previews, user-written answers, or `ask_supervisor` coordination.
-
-### Optional graphical workspace dashboard
-
-Run **`/workspace-dashboard`** explicitly from an interactive Pi session inside a Herdr pane.
-It opens a new **Herdr tab** with three read-only sections:
-
-- **Workflows:** actual execution state, smooth Kitty PNG graphics, rounded status cards, curved directed
-  routes with moving packet trails, active-port pulses, selected-node accents, visit counts,
-  completion bar, token/time metrics, and node previews. Responsive layered layout groups retries
-  and adapts between horizontal and vertical flow.
-- **Plans:** searchable titles and rendered Markdown with headings, lists, tables, checkboxes, and highlighted code.
-- **Contracts:** the same document reader, with type/status and producer/consumer metadata separated from frontmatter.
-
-**Requirements:** Linux/macOS, a Herdr server supporting `layout.apply` with argv-backed panes,
-Node (already used by Pi), and a terminal/Herdr client path that acknowledges Kitty graphics.
-The viewer probes support inside its own PTY. Unsupported paths show an explanation; there is no silent
-text-only fallback. Managed git/npm installations resolve Pi UI peers from the launching Pi installation
-(they do not need their own copies of Pi). Early startup/import failures stay visible until dismissed,
-rather than making the Herdr tab disappear. No additional packages or shell configuration are required. A particular shell is
-not required: Herdr launches Node directly, without shell command interpolation.
-
-**Controls:** `1`/`2`/`3` or click tabs; up/down select an item; left/right select a workflow node;
-click graph nodes for details; `/` filters item titles; PgUp/PgDn or wheel scroll documents;
-`f` searches document text, Enter finds a match, `n` finds the next; `q` closes the viewer.
-Use a terminal of at least **86 columns × 28 rows** (larger is better).
-
-The hybrid renderer uses pixel graphics for the graph and terminal text for documents and controls.
-It does not render HTML, fetch remote images, execute Markdown code, or open links automatically.
-The diagram shows declared **direct** edges and **observed** conditional routes, not speculative routes.
-Historical journals only supply routes actually recorded; an incomplete historical journal is marked
-unknown, not falsely running/completed. Long graphs currently fit the available canvas rather than
-providing pan/zoom.
-
-The viewer reads an atomic snapshot in a private temporary directory, refreshed once per second.
-It never controls workflows, modifies documents, sends model messages, or connects to the mobile relay.
-Closing its tab does **not** stop workflows. On Pi shutdown/reload the viewer retains its last snapshot,
-marks itself disconnected, and stops animating active work; reopen with the command after reload.
-Temporary snapshot cleanup is best-effort after shutdown (OS temporary-directory cleanup applies if Pi exits immediately). Multiple opens share one session publisher.
-The existing `/workflows`, `/plans`, and `/contracts` interfaces are unchanged and remain available everywhere.
 
 `/workflows` shows the walk with routing inline, so an escalation loop is legible at a glance:
 
