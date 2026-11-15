@@ -59,7 +59,7 @@ import { evaluateCompletionMutationGuard } from "./completion-guard.ts";
 import { getPiSpawnCommand } from "./pi-spawn.ts";
 import * as fs from "fs";
 import { createJsonlWriter, type JsonlWriter } from "./jsonl-writer.ts";
-import { attachPostExitStdioGuard, trySignalChild } from "./post-exit-stdio-guard.ts";
+import { attachPostExitStdioGuard, terminateChild } from "./post-exit-stdio-guard.ts";
 import { applyThinkingSuffix, buildPiArgs, cleanupTempDir, resolvePiLaunchToolPlan } from "./pi-args.ts";
 import { decodeSubagentCapabilityCeiling, resolveCurrentSubagentCapabilityCeiling, SUBAGENT_CAPABILITY_CEILING_ENV } from "./capability-ceiling.ts";
 import { resolveEffectiveThinking } from "./model-info.ts";
@@ -88,7 +88,7 @@ import { appendTurnBudgetSystemPrompt, DEFAULT_TURN_BUDGET, formatTurnBudgetOutp
 import { loadAgentSettings } from "./agent-settings.ts";
 import { initialToolBudgetState, toolBudgetState } from "./tool-budget.ts";
 import { agentDefinitionDigest, launchBindingDigest } from "./launch-contract.ts";
-import { createBoundedByteTail, createBoundedLineReader, formatProtocolOutputLimit, MAX_CHILD_STDERR_BYTES, projectChildLifecycle, type ChildLifecycleAction, type ProtocolOutputLimit as ProtocolOutputLimitType } from "./child-protocol.ts";
+import { createBoundedByteTail, createBoundedLineReader, formatProtocolOutputLimit, MAX_CHILD_STDERR_BYTES, projectChildLifecycle, type ProtocolOutputLimit as ProtocolOutputLimitType } from "./child-protocol.ts";
 
 import { EventEmitter } from "node:events";
 
@@ -434,8 +434,30 @@ async function runSingleAttempt(
 		cwd: options.cwd ?? runtimeCwd,
 		shell: false,
 		stdio: ["ignore", "pipe", "pipe"],
+		detached: process.platform !== "win32",
 		env: spawnEnv,
 	});
+	attachPostExitStdioGuard(proc);
+	let settledDrain: ReturnType<typeof setTimeout> | undefined;
+	let generationTimer: ReturnType<typeof setTimeout> | undefined;
+	let generationExpired = false;
+	let lifecycleSettled = false;
+	let settledTermination = false;
+	let activeTools = 0;
+	const configuredGenerationMs = Number(process.env.PI_WORKFLOW_GENERATION_TIMEOUT_MS ?? 300_000);
+	const generationMs = Number.isFinite(configuredGenerationMs) && configuredGenerationMs > 0 ? configuredGenerationMs : 300_000;
+	const clearGeneration = () => { if (generationTimer) clearTimeout(generationTimer); generationTimer = undefined; };
+	const armGeneration = () => {
+		clearGeneration();
+		generationTimer = setTimeout(() => {
+			generationExpired = true;
+			result.error = `Model generation exceeded ${generationMs}ms without completing an assistant message.`;
+			terminateChild(proc);
+		}, generationMs);
+	};
+	// Cover provider requests that never emit message_start as well as long streams.
+	armGeneration();
+	proc.once("close", () => { clearGeneration(); if (settledDrain) clearTimeout(settledDrain); });
 
 	const stdoutReader = createBoundedLineReader({
 		stream: "stdout",
@@ -443,6 +465,10 @@ async function runSingleAttempt(
 			try {
 				const event = JSON.parse(line);
 				options.onEvent?.(event);
+				if (event.type === "tool_execution_start") activeTools++;
+				if (event.type === "tool_execution_end") activeTools = Math.max(0, activeTools - 1);
+				if (activeTools === 0 && ((event.type === "message_start" && event.message?.role === "assistant") || event.type === "tool_execution_end")) armGeneration();
+				if ((event.type === "message_end" && event.message?.role === "assistant") || event.type === "tool_execution_start" || event.type === "agent_settled") clearGeneration();
 				if (event.type === "message_end" || event.type === "tool_result_end") {
 					result.messages?.push(event.message);
 					if (event.message?.role === "assistant") {
@@ -471,7 +497,7 @@ async function runSingleAttempt(
 						turnBudgetExceededFired = true;
 						result.turnBudgetExceeded = true;
 						result.error = turnBudgetExceededMessage(turnBudget, progress.turnCount ?? 0);
-						trySignalChild(proc, "SIGTERM");
+						terminateChild(proc);
 					}
 				}
 				if (event.type === "agent_end") {
@@ -515,7 +541,12 @@ async function runSingleAttempt(
 				if (event.type === "agent_end" || event.type === "agent_settled") {
 					const action = projectChildLifecycle(event);
 					if (action === "start-drain") {
-						// Start draining output
+						if (event.type === "agent_settled") lifecycleSettled = true;
+						clearGeneration();
+						settledDrain ??= setTimeout(() => {
+							settledTermination = proc.exitCode === null && proc.signalCode === null;
+							terminateChild(proc);
+						}, 1000);
 					}
 				}
 				shared.transcriptWriter?.writeChildEvent(event);
@@ -538,6 +569,7 @@ async function runSingleAttempt(
 		onLimit: (limit: ProtocolOutputLimitType) => {
 			result.protocolError = limit;
 			result.error = formatProtocolOutputLimit(limit);
+			terminateChild(proc);
 		},
 	});
 
@@ -549,17 +581,16 @@ async function runSingleAttempt(
 
 	proc.stdout.on("end", () => stdoutReader.end());
 
-	const abortHandler = () => {
-		trySignalChild(proc, "SIGTERM");
-	};
+	const abortHandler = () => terminateChild(proc);
 	options.signal?.addEventListener("abort", abortHandler);
 	options.interruptSignal?.addEventListener("abort", abortHandler);
+	if (options.signal?.aborted || options.interruptSignal?.aborted) abortHandler();
 
 	let timedOutMidRun = false;
 	const timeoutHandle = attemptTimeout
 		? setTimeout(() => {
 			timedOutMidRun = true;
-			trySignalChild(proc, "SIGKILL");
+			terminateChild(proc);
 		}, attemptTimeout.remainingMs)
 		: undefined;
 
@@ -603,8 +634,9 @@ async function runSingleAttempt(
 						// Build a final result from the accumulated state
 						progress.status = "completed";
 						progress.durationMs = Date.now() - startTime;
-						result.exitCode = childExitCode ?? 1;
-						result.exitSignal = exitSignal;
+						result.exitCode = lifecycleSettled && settledTermination && !result.error ? 0 : childExitCode ?? 1;
+						result.exitSignal = lifecycleSettled && result.exitCode === 0 ? null : exitSignal;
+						if (generationExpired) result.timedOut = true;
 						result.finalOutput = getFinalOutput(result.messages ?? []);
 
 						// Truncate
@@ -648,8 +680,9 @@ async function runSingleAttempt(
 	// Attached completion path (child exited before detach fired)
 	progress.status = "completed";
 	progress.durationMs = Date.now() - startTime;
-	result.exitCode = exitCode ?? 1;
-	result.exitSignal = exitSignal;
+	result.exitCode = lifecycleSettled && settledTermination && !result.error && !options.signal?.aborted ? 0 : exitCode ?? 1;
+	result.exitSignal = lifecycleSettled && result.exitCode === 0 ? null : exitSignal;
+	if (generationExpired) result.timedOut = true;
 
 	if (timedOutMidRun) {
 		// Fixes a pre-existing gap: this path previously only SIGKILLed the

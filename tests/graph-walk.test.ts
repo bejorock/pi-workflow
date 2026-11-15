@@ -523,7 +523,7 @@ describe("graph walk: cancellation", () => {
 		expect(result.path).toEqual(["a"]);
 	});
 
-	it("passes the signal through to the runner", async () => {
+	it("passes a round cancellation signal through to the runner", async () => {
 		const controller = new AbortController();
 		let received: AbortSignal | undefined;
 
@@ -536,7 +536,8 @@ describe("graph walk: cancellation", () => {
 			},
 		});
 
-		expect(received).toBe(controller.signal);
+		expect(received).toBeInstanceOf(AbortSignal);
+		expect(received?.aborted).toBe(false);
 	});
 });
 

@@ -44,6 +44,7 @@
 
 import type { BuiltGraph, Edge, EndSymbol, GraphState, NodeDef } from "./graph-dsl.ts";
 import { END } from "./graph-dsl.ts";
+import { boundedCallback } from "./bounded-callback.ts";
 import {
 	DEFAULT_MAX_ITERATIONS,
 	describeTarget,
@@ -397,7 +398,7 @@ function resolveEdges(
 
 		let target: string | EndSymbol;
 		try {
-			target = edge.condition(state, result);
+			target = boundedCallback(edge.condition, state, result);
 		} catch (error) {
 			return {
 				error: `Edge condition for node "${nodeId}" threw: ${error instanceof Error ? error.message : String(error)}`,
@@ -702,21 +703,39 @@ export async function runSuperstepGraph(
 
 		// Fire every ready node concurrently. Writes are deferred until after
 		// the barrier resolves, so no node sees another's result from this round.
+		let fatalError: string | undefined;
+		const roundAbort = new AbortController();
+		const abortRound = () => roundAbort.abort();
+		options.signal?.addEventListener("abort", abortRound, {once: true});
+		if (options.signal?.aborted) abortRound();
 		const roundResults = await Promise.all(
 			roundNodeIds.map(async (nodeId, index) => {
 				// Frontier nodes always come from the graph's validated node set.
 				const node = graph.nodes.get(nodeId)!;
 				const step = stepBase + index + 1;
-				options.onNodeStart?.({ step, nodeId, nodeType: node.def.type, round });
 				const nodeStartedAt = Date.now();
+				let timer: ReturnType<typeof setTimeout> | undefined;
+				let onAbort: (() => void) | undefined;
 				try {
-					const outcome = await options.runNode(node, state, {
+					options.onNodeStart?.({ step, nodeId, nodeType: node.def.type, round });
+					const interrupted = new Promise<never>((_, reject) => {
+						onAbort = () => { timer ??= setTimeout(() => reject(new Error("Node cancelled; cleanup deadline exceeded.")), 2500); };
+						roundAbort.signal.addEventListener("abort", onAbort, {once: true});
+						if (roundAbort.signal.aborted) onAbort();
+					});
+					const outcome = await Promise.race([options.runNode(node, state, {
 						step,
 						runId: options.runId,
-						signal: options.signal,
-					});
+						signal: roundAbort.signal,
+					}), interrupted]);
+					if (outcome.technicalFailure) {
+						fatalError ??= `Node "${nodeId}" hit a technical failure: ${outcome.error ?? "unknown error"}`;
+						roundAbort.abort();
+					}
 					return { nodeId, node, step, nodeStartedAt, outcome };
 				} catch (error) {
+					fatalError ??= `Node "${nodeId}" failed: ${error instanceof Error ? error.message : String(error)}`;
+					roundAbort.abort();
 					return {
 						nodeId,
 						node,
@@ -724,9 +743,13 @@ export async function runSuperstepGraph(
 						nodeStartedAt,
 						runnerError: error instanceof Error ? error.message : String(error),
 					};
+				} finally {
+					if (timer) clearTimeout(timer);
+					if (onAbort) roundAbort.signal.removeEventListener("abort", onAbort);
 				}
 			}),
 		);
+		options.signal?.removeEventListener("abort", abortRound);
 
 		let aborted = false;
 		const firedEdges: FiredEdge[] = [];
@@ -757,7 +780,7 @@ export async function runSuperstepGraph(
 				options.onNodeComplete?.(execution);
 				aborted = true;
 				status = "aborted";
-				error = `Node "${nodeId}" failed: ${r.runnerError}`;
+				error = fatalError ?? `Node "${nodeId}" failed: ${r.runnerError}`;
 				continue;
 			}
 
@@ -787,7 +810,7 @@ export async function runSuperstepGraph(
 				options.onNodeComplete?.(execution);
 				aborted = true;
 				status = "aborted";
-				error = `Node "${nodeId}" hit a technical failure: ${outcome.error ?? "unknown error"}`;
+				error = fatalError ?? `Node "${nodeId}" hit a technical failure: ${outcome.error ?? "unknown error"}`;
 				continue;
 			}
 

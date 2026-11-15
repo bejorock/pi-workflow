@@ -12,8 +12,9 @@
  * optional `timeout` (seconds) and implements it cleanly — kills the
  * child's process tree and returns a normal tool-result error
  * ("Command timed out after Ns"), the same shape as "exited with code 1".
- * This guard just fills that field in with a default when the model didn't
- * set one itself; an explicit `timeout` from the model always wins.
+ * This guard fills that field in when absent and validates explicit values
+ * as positive finite seconds, capped at max(configured default, 3600).
+ * Larger intentional values require raising the project setting.
  *
  * Deliberately does NOT touch:
  *  - Agent/subagent process lifetime (unbounded by design — see
@@ -59,10 +60,12 @@ export function registerBashTimeoutGuard(
 
 	pi.on("tool_call", (event) => {
 		if (!isToolCallEventType("bash", event)) return;
-		// A model-specified timeout always wins — this only fills the gap
-		// left when the model didn't think to set one. No re-validation
-		// happens after a tool_call mutation (pi's documented contract), so
-		// this is a plain, safe in-place patch.
+		// Units are seconds, not milliseconds. Reject suspicious/invalid values
+		// rather than silently turning a short command into a multi-hour wait.
+		const ceiling = Math.max(timeoutSeconds, 3600);
+		if (event.input.timeout !== undefined && (!Number.isFinite(event.input.timeout) || event.input.timeout <= 0 || event.input.timeout > ceiling)) {
+			return {block: true, reason: `bash timeout must be a positive number of SECONDS, at most ${ceiling}. Use 120 for two minutes, not 120000. For intentional longer work, raise bashTimeoutSeconds in workflow settings or disable bashTimeoutGuard.`};
+		}
 		if (event.input.timeout === undefined) {
 			event.input.timeout = timeoutSeconds;
 		}

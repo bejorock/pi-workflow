@@ -395,19 +395,28 @@ export function createGraphWorkflowTool(options: GraphToolOptions = {}): ToolDef
 			const runAbort = new AbortController();
 			controller.begin(runId, meta.name, runAbort);
 
-			const display = options.workflowManager
-				? new GraphDisplayBridge({
-						manager: options.workflowManager,
-						runId,
-						name: meta.name,
-						description: meta.description,
-						script,
-						cwd,
-						abortController: runAbort,
-					})
-				: undefined;
+			let display: GraphDisplayBridge | undefined;
+			try {
+				display = options.workflowManager
+					? new GraphDisplayBridge({
+							manager: options.workflowManager,
+							runId,
+							name: meta.name,
+							description: meta.description,
+							script,
+							cwd,
+							abortController: runAbort,
+						})
+					: undefined;
 
-			options.onRunStart?.({ runId, name: meta.name, nodeIds });
+				options.onRunStart?.({ runId, name: meta.name, nodeIds });
+			} catch (error) {
+				runAbort.abort();
+				const message = error instanceof Error ? error.message : String(error);
+				controller.complete({ runId, name: meta.name, text: `Workflow startup failed: ${message}` });
+				display?.runFailed(message);
+				throw error;
+			}
 
 			const forkContext: ForkContextOptions | undefined = ctx.model
 				? {

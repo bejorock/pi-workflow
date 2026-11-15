@@ -202,15 +202,24 @@ export async function executeGraphRun(options: GraphRunOptions): Promise<GraphRu
 		PI_WORKFLOW_CONTROLLED: "1",
 	};
 
-	const context = new GraphRunContext({
-		cwd: options.cwd,
-		runId,
-		tokenBudget: options.tokenBudget,
-		useWorktree: options.useWorktree,
-		extraEnv: channelEnv,
-	});
+	let context: GraphRunContext;
+	try {
+		context = new GraphRunContext({
+			cwd: options.cwd,
+			runId,
+			tokenBudget: options.tokenBudget,
+			useWorktree: options.useWorktree,
+			extraEnv: channelEnv,
+		});
+	} catch (error) {
+		cleanupChannel(chDir);
+		throw error;
+	}
 
 	let poller: ChannelPoller | undefined;
+	let journal: GraphJournal;
+	let runNode: ReturnType<GraphRunOptions["makeRunNode"]>;
+	try {
 	if (broker) {
 		poller = new ChannelPoller(chDir, {
 			onRequest: (request) => {
@@ -254,15 +263,17 @@ export async function executeGraphRun(options: GraphRunOptions): Promise<GraphRu
 							reason: result.reason,
 							answers: result.answers?.questions,
 						});
+					}).catch((error) => {
+						poller!.reply(request.id, {source: "cancelled", reason: `Request failed: ${String(error)}`});
 					});
 			},
 		});
 		poller.start();
 	}
 
-	const runNode = options.makeRunNode(context);
+	runNode = options.makeRunNode(context);
 
-	const journal = GraphJournal.create({
+	journal = GraphJournal.create({
 		journalDir,
 		runId,
 		scriptHash,
@@ -272,6 +283,12 @@ export async function executeGraphRun(options: GraphRunOptions): Promise<GraphRu
 		nodeIds,
 		initialState: graph.initialState,
 	});
+	} catch (error) {
+		context.cleanup();
+		poller?.stop();
+		cleanupChannel(chDir);
+		throw error;
+	}
 
 	const onNodeStart = (info: {
 		step: number;

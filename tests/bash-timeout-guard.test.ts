@@ -50,15 +50,16 @@ describe("registerBashTimeoutGuard", () => {
 		expect(event.input.timeout).toBe(3600);
 	});
 
-	it("preserves an explicit zero timeout from the model (falsy but defined)", () => {
-		const { pi, handlers } = makeFakePi();
-		registerBashTimeoutGuard(pi);
-		// Not a realistic value (pi's own schema requires > 0), but the guard's
-		// job is only to fill an *absent* timeout, not to second-guess a
-		// present one — that validation belongs to pi's tool, not this guard.
-		const event = bashEvent({ command: "echo hi", timeout: 0 });
-		handlers["tool_call"]![0](event);
-		expect(event.input.timeout).toBe(0);
+	it.each([0, -1, NaN, Infinity, 120000])("blocks invalid or suspicious seconds value %s with actionable guidance", timeout => {
+		const {pi, handlers} = makeFakePi(); registerBashTimeoutGuard(pi);
+		expect(handlers.tool_call[0](bashEvent({command: "echo hi", timeout}))).toMatchObject({
+			block: true, reason: expect.stringContaining("Use 120 for two minutes, not 120000"),
+		});
+	});
+
+	it("allows an explicitly configured longer timeout", () => {
+		const {pi, handlers} = makeFakePi(); registerBashTimeoutGuard(pi, {timeoutSeconds: 7200});
+		expect(handlers.tool_call[0](bashEvent({command: "build", timeout: 7200}))).toBeUndefined();
 	});
 
 	it("respects a custom timeoutSeconds override", () => {

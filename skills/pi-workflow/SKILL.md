@@ -283,6 +283,14 @@ The 12-character header follows Claude's documented format; the other hard chara
 pi-workflow policy. These limits **do not apply** to Markdown previews, document contents,
 user-written answers, or `ask_supervisor` coordination.
 
+### Failure and execution bounds
+
+- Fatal node errors cancel parallel siblings and allow only a bounded cleanup grace; ordinary routable blocked results still follow the graph's edges.
+- Child cancellation escalates from SIGTERM to SIGKILL after one second. Settled or exited children cannot hold completion forever via extension timers or inherited output pipes.
+- A model-generation phase (including a provider request that never starts streaming) defaults to five minutes. `PI_WORKFLOW_GENERATION_TIMEOUT_MS` adjusts this in milliseconds. This is **not** an overall agent timeout: active tools and human/supervisor waits are exempt.
+- Synchronous function nodes, dynamic prompts/commands, and conditional routes have a one-second CPU deadline. Use `command()` or agent nodes for long work. Callback closures remain available.
+- After startup failure or cancellation, controller ownership is released when bounded cleanup settles, allowing a fresh workflow.
+
 ### Interactive Gates vs. In-Flight Tools
 
 Workflows support two distinct ways to bring external judgment or decisions into a run:
@@ -726,7 +734,7 @@ subagent runs need to see it too.
 |-----|---------|--------|
 | `blankStopGuard` | `true` | Auto-"continue" nudge when a model returns a genuinely empty or thinking-only completion. Set `false` to disable. |
 | `bashTimeoutGuard` | `true` | Injects a default `timeout` into `bash` calls that don't set one. Set `false` to disable. Never touches `ask`/`ask_supervisor` — those stay unbounded regardless of this setting. |
-| `bashTimeoutSeconds` | `600` (10 min) | The default injected by `bashTimeoutGuard`. A model-specified `timeout` on an individual `bash` call always wins over this. |
+| `bashTimeoutSeconds` | `600` (10 min) | Default injected by `bashTimeoutGuard`, in **seconds**. Explicit values must be positive and finite, no larger than `max(bashTimeoutSeconds, 3600)`. Use `120`, not `120000`, for two minutes; raise this setting for intentionally longer commands. |
 | `defaultTurnBudget` | `{"maxTurns": 50, "graceTurns": 2}` | Applied to any subagent run (graph node or plain `subagent` call) whose agent frontmatter declares no `turnBudget`. An agent's own frontmatter `turnBudget` always wins over this. Set to `null` to disable the default entirely (agents with no frontmatter `turnBudget` then run unbounded). |
 
 ## Context: Fresh vs Fork

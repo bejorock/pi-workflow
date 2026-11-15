@@ -565,7 +565,9 @@ Top-level keys (outside `agents`) control extension behaviour. Currently support
   below). Defaults to enabled when absent. Same read-once-at-start semantics as
   `blankStopGuard`.
 - `bashTimeoutSeconds`: overrides the default `bash`-call timeout, in seconds. Defaults to
-  `600` (10 minutes) when absent. A model-specified `timeout` on an individual `bash` call
+  `600` (10 minutes) when absent. Valid explicit timeouts are limited to the greater of this value
+  and 3600 seconds; invalid or larger values are rejected with seconds-vs-milliseconds guidance.
+  A model-specified `timeout` on an individual `bash` call
   always wins over this default.
 - `defaultTurnBudget`: overrides the turn budget applied to any subagent run (graph node or
   plain `subagent` tool call) whose agent frontmatter declares none. Defaults to
@@ -1055,13 +1057,29 @@ apply inside worktree-isolated runs.
 parameter is capped at 600 seconds (10 minutes) by default. This closes a real production gap: a
 subagent that runs an unbounded command (e.g. `find /` searching the entire filesystem) can hang
 forever — no further turns fire, so nothing else in the stack (the blank-stop guard, turn budgets)
-ever gets a chance to react. The fix is deliberately narrow: it only fills in `timeout` when the
-model didn't set one — an explicit `timeout` from the model always wins — and it never touches
+ever gets a chance to react. Missing timeouts are filled in; explicit values must be positive,
+finite **seconds**, no greater than `max(bashTimeoutSeconds, 3600)`. Suspicious values such as
+`120000` are rejected with guidance to use `120` for two minutes instead. Raise the project setting
+for intentional longer commands, or disable the guard. This guard never touches
 agent/process lifetime, `ask`, or `ask_supervisor` in any way (human questions stay
 unbounded, as documented above). When it fires, the model just sees an ordinary tool-result error
 ("Command timed out after 600 seconds"), the same shape as "exited with code 1", and can react —
 not lose the whole session. Set `"bashTimeoutGuard": false` to disable, or `"bashTimeoutSeconds"`
 to change the default, in `.pi-workflow/settings.json`.
+
+**Error and shutdown safeguards.** Fatal parallel-node failures cancel sibling work immediately;
+cleanup has a bounded grace period instead of waiting forever for the whole round. Child
+cancellation escalates from SIGTERM to SIGKILL after one second. Exited children cannot leave
+completion blocked indefinitely by descendants holding output pipes; settled children also get a
+bounded drain. Startup failures release controller ownership so a new workflow can start.
+
+Each child model-generation phase has a five-minute deadline, including a provider request that
+never starts streaming. It is not an overall agent deadline: active tools and human/supervisor
+questions are exempt. Set `PI_WORKFLOW_GENERATION_TIMEOUT_MS` to a positive millisecond value
+to adjust it. This bounds a single malformed response that would otherwise evade turn budgets.
+Synchronous graph callbacks (function nodes, dynamic prompts/commands, and conditional routes)
+have a one-second CPU deadline while retaining their closures. Use `command()` or agent nodes
+for long-running work, not synchronous JavaScript loops.
 
 **Runaway subagents are bounded by a turn budget.** Every subagent run (graph node or plain
 `subagent` tool call) has a turn budget, even when its agent frontmatter declares none: default

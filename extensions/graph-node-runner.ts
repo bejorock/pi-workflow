@@ -11,6 +11,7 @@
  * branch on.
  */
 
+import { boundedCallback } from "./bounded-callback.ts";
 import { runCommandProcess } from "./command-process.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -355,7 +356,8 @@ export function createNodeRunner(options: CreateNodeRunnerOptions): NodeRunner {
 				// so downstream prompts and edges work unchanged.
 				let text: string;
 				try {
-					text = String(node.def.fn(state));
+					const fn = node.def.fn;
+					text = boundedCallback(() => String(fn(state)));
 				} catch (error) {
 					return {
 						result: withResultText({ status: "ok", text: "", data: {} }),
@@ -372,11 +374,11 @@ export function createNodeRunner(options: CreateNodeRunnerOptions): NodeRunner {
 				return runCommandNode(node.id, node.def, state, options.cwd, signal);
 
 			case "agent":
-				return runAgentNode(node, node.def.agentName, node.def.promptFn(state), signal);
+				return runAgentNode(node, node.def.agentName, boundedCallback(node.def.promptFn, state), signal);
 
 			case "human": {
 				const def = node.def;
-				const prompt = def.promptFn(state);
+				const prompt = boundedCallback(def.promptFn, state);
 				const lengthError = questionLengthError([{ question: prompt, header: "", options: def.options?.map(label => ({ label })) }]);
 				if (lengthError) return { result: null, technicalFailure: true, error: `human() node "${node.id}": ${lengthError}` };
 
@@ -516,7 +518,7 @@ export function createNodeRunner(options: CreateNodeRunnerOptions): NodeRunner {
 		if (typeof def.command === "function") {
 			let evaluated: unknown;
 			try {
-				evaluated = def.command(state);
+				evaluated = boundedCallback(def.command, state);
 			} catch (error) {
 				return {
 					result: withResultText({
