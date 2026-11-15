@@ -92,13 +92,13 @@ describe("registerBashTimeoutGuard", () => {
 		expect(JSON.stringify(readEvent)).toBe(before);
 	});
 
-	it("never touches a custom tool (e.g. ask_user_question-shaped event)", () => {
+	it("never touches a custom tool (e.g. ask-shaped event)", () => {
 		const { pi, handlers } = makeFakePi();
 		registerBashTimeoutGuard(pi);
 		const askEvent = {
 			type: "tool_call" as const,
 			toolCallId: "tc-3",
-			toolName: "ask_user_question",
+			toolName: "ask",
 			input: { questions: [{ question: "Which approach?" }] },
 		};
 		const before = JSON.stringify(askEvent);

@@ -248,9 +248,9 @@ These are enforced limits for **parent and child agents**, not just style sugges
 
 | Field | Maximum characters |
 |---|---:|
-| `ask_user_question.questions[].question` | 240 |
+| `ask.questions[].question` | 240 |
 | `human()` prompt, **after interpolation/function evaluation** | 240 |
-| `ask_user_question.questions[].header` | 12 |
+| `ask.questions[].header` | 12 |
 | Option `label` / each `human()` option string | 60 (prefer 1–5 words) |
 | Option `description` | 160 |
 
@@ -270,7 +270,7 @@ g.node('approve', human('Approve the implementation plan?', {
 ```
 
 ```js
-ask_user_question({ questions: [{
+ask({ questions: [{
   header: 'Storage', question: 'Which storage approach should we use?',
   options: [
     { label: 'SQLite', description: 'Simple local deployment; one writer.' },
@@ -293,10 +293,10 @@ Workflows support two distinct ways to bring external judgment or decisions into
    - **Artifact Previews:** Pass `artifacts: ['plan', 'contract']` in options to render the project's active plans and contracts in the preview pane so the human can review full specs before deciding.
    - **Rule:** Always specify a `default` fallback for human nodes so a headless run (no TUI) does not hang.
 
-2. **In-Flight Tools (`ask_user_question`, `ask_supervisor`)**
+2. **In-Flight Tools (`ask`, `ask_supervisor`)**
    - **Tool access:** An omitted agent `tools` field uses normal defaults. An explicit list is authoritative, including these question tools, `plan`, `contract`, and `node_state`; add each needed name. `tools: []` grants no tools. Permission rules do not grant omitted tools. Both direct subagents and workflow agents follow this policy. Lazy skills require an explicit `read` grant. Only `structured_output` is added implicitly when a node requests `outputSchema`.
    - **Purpose:** Prompting for details *while an agent is executing* inside its node.
-   - **`ask_user_question`**: Spawns a custom questionnaire dialog to ask the user. Used when an agent needs user values or design preferences to proceed.
+   - **`ask`**: The only user-question tool name (no legacy alias). Ask 1–4 single-select questions, with optional descriptions and Markdown previews. All questions must be answered before submission. Do not request multi-select, notes, or partial answers. A built-in **Reply in chat** choice opens a custom text input while the tool remains pending; Moshi Chat View can supply that text after the form closes. Do not add that reserved label yourself. Custom text is a real answer, not an implied approval. Escape cancels the entire questionnaire. Native Moshi publication is optional and uses the parent session for displayed child requests.
    - **`ask_supervisor`**: Child agents call this to ask the main agent (the supervisor) for instructions or to report progress.
    - **Restrictions:** Agents MUST NOT use these tools to debug errors or ask for code implementations. Errors and missing capabilities must be escalated via the escalation protocol (`STATUS: blocked`).
 
@@ -633,7 +633,7 @@ Create agent files in `~/.pi/agent/agents/*.md` (user scope) or `.pi/agents/*.md
 name: scout
 description: Lightweight exploration agent that finds security issues and code smells.
 model: google/gemini-2.5-flash
-tools: read, grep, bash, ask_supervisor, ask_user_question
+tools: read, grep, bash, ask_supervisor, ask
 turnBudget: {"maxTurns": 5, "graceTurns": 1}
 acceptance:
   level: none
@@ -722,7 +722,7 @@ subagent runs need to see it too.
 | Key | Default | Effect |
 |-----|---------|--------|
 | `blankStopGuard` | `true` | Auto-"continue" nudge when a model returns a genuinely empty or thinking-only completion. Set `false` to disable. |
-| `bashTimeoutGuard` | `true` | Injects a default `timeout` into `bash` calls that don't set one. Set `false` to disable. Never touches `ask_user_question`/`ask_supervisor` — those stay unbounded regardless of this setting. |
+| `bashTimeoutGuard` | `true` | Injects a default `timeout` into `bash` calls that don't set one. Set `false` to disable. Never touches `ask`/`ask_supervisor` — those stay unbounded regardless of this setting. |
 | `bashTimeoutSeconds` | `600` (10 min) | The default injected by `bashTimeoutGuard`. A model-specified `timeout` on an individual `bash` call always wins over this. |
 | `defaultTurnBudget` | `{"maxTurns": 50, "graceTurns": 2}` | Applied to any subagent run (graph node or plain `subagent` call) whose agent frontmatter declares no `turnBudget`. An agent's own frontmatter `turnBudget` always wins over this. Set to `null` to disable the default entirely (agents with no frontmatter `turnBudget` then run unbounded). |
 
@@ -1017,7 +1017,7 @@ permission config file that pre-approves the tools your workflows need:
     "subagent": "allow",
     "node_state": "allow",
     "ask_supervisor": "allow",
-    "ask_user_question": "allow"
+    "ask": "allow"
   }
 }
 ```

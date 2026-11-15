@@ -1,8 +1,9 @@
 /**
- * Tests for the ask_user_question TUI component and validator.
+ * Tests for the ask TUI component and validator.
  */
 
 import { describe, expect, it, vi } from "vitest";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
 	validateQuestions,
@@ -10,7 +11,7 @@ import {
 	type TUIQuestion,
 } from "../extensions/ask-user-question-tui.ts";
 
-describe("ask_user_question validator", () => {
+describe("ask validator", () => {
 	it("returns no_questions for empty list", () => {
 		expect(validateQuestions([])).toBe("no_questions");
 	});
@@ -84,7 +85,7 @@ describe("ask_user_question validator", () => {
 	});
 });
 
-describe("ask_user_question TUI component input and rendering", () => {
+describe("ask TUI component input and rendering", () => {
 	it("returns no_ui when run in non-tui mode", async () => {
 		const ctx = { mode: "rpc" } as unknown as ExtensionContext;
 		const res = await runAskUserQuestionTUI(ctx, [{ question: "Q1", header: "H1" }]);
@@ -146,7 +147,15 @@ describe("ask_user_question TUI component input and rendering", () => {
 		expect(res.answers[0].kind).toBe("option");
 	});
 
-	it("handles multi-select toggles and next sentinel", async () => {
+	it("rejects unsupported multi-select before opening a dialog", async () => {
+		const custom = vi.fn();
+		const result = await runAskUserQuestionTUI({mode: "tui", ui: {custom}} as unknown as ExtensionContext,
+			[{question: "Select?", header: "Choice", options: [{label: "A"}], multiSelect: true}]);
+		expect(result.error).toBe("multi_select_unsupported");
+		expect(custom).not.toHaveBeenCalled();
+	});
+
+	it("requires every question before submitting and supports revisiting tabs", async () => {
 		const custom = vi.fn().mockImplementation((fn) => {
 			const tui = { requestRender: vi.fn() };
 			const theme = {
@@ -163,18 +172,14 @@ describe("ask_user_question TUI component input and rendering", () => {
 
 			const comp = fn(tui, theme, kb, done);
 
-			// Space on first option to select it
-			comp.handleInput(" ");
-			// Down to B (index 1)
-			comp.handleInput("\x1b[B");
-			// Down to Other (index 2)
-			comp.handleInput("\x1b[B");
-			// Down to Next → (index 3)
-			comp.handleInput("\x1b[B");
-			// Enter on Next → goes to Submit
+			comp.handleInput("\x1b[C"); // second question
+			comp.handleInput("\x1b[C"); // submit
 			comp.handleInput("\r");
-
-			// In Submit tab, hit Enter to submit
+			expect(resolvedValue).toBeUndefined();
+			comp.handleInput("\x1b[C"); // first
+			comp.handleInput("\r"); // answer first, move to second
+			comp.handleInput("\r"); // answer second, move to submit
+			expect(comp.render(80).join("\n")).toContain("Press Enter to submit");
 			comp.handleInput("\r");
 
 			return resolvedValue;
@@ -183,18 +188,14 @@ describe("ask_user_question TUI component input and rendering", () => {
 		const ctx = { mode: "tui", ui: { custom } } as unknown as ExtensionContext;
 		const questions: TUIQuestion[] = [
 			{
-				question: "Select multi?",
-				header: "H1",
-				options: [{ label: "A" }, { label: "B" }],
-				multiSelect: true,
+				question: "First?", header: "H1", options: [{label: "A"}],
 			},
+			{ question: "Second?", header: "H2", options: [{label: "B"}] },
 		];
 
 		const res = await runAskUserQuestionTUI(ctx, questions);
 		expect(res.cancelled).toBe(false);
-		expect(res.answers).toHaveLength(1);
-		expect(res.answers[0].selected).toEqual(["A"]);
-		expect(res.answers[0].kind).toBe("multi");
+		expect(res.answers.map(a => a.answer)).toEqual(["A", "B"]);
 	});
 
 	it("guarantees rendered lines never exceed the terminal width", async () => {
@@ -208,6 +209,7 @@ describe("ask_user_question TUI component input and rendering", () => {
 			};
 			const kb = {};
 			const done = () => {};
+			let rendered = 0;
 
 			const comp = fn(tui, theme, kb, done);
 
@@ -215,23 +217,25 @@ describe("ask_user_question TUI component input and rendering", () => {
 			const widths = [40, 80, 120, 180];
 			for (const w of widths) {
 				const lines = comp.render(w);
+				rendered += lines.length;
 				for (const line of lines) {
-					const lineLen = line.replace(/\x1b\[[0-9;]*m/g, "").length; // length excluding ANSI styles
+					const lineLen = visibleWidth(line); // length excluding ANSI styles
 					expect(lineLen, `Rendered line must not exceed width ${w}: "${line}"`).toBeLessThanOrEqual(w);
 				}
 			}
 
-			return { cancelled: false };
+			expect(rendered).toBeGreaterThan(0);
+			return { answers: [], cancelled: true };
 		});
 
 		const ctx = { mode: "tui", ui: { custom } } as unknown as ExtensionContext;
 		const questions: TUIQuestion[] = [
 			{
 				question: "This is an extremely long question string that will definitely require word-wrapping at almost any reasonable terminal width.",
-				header: "ExtremelyLongHeaderNameHere",
+				header: "Details",
 				options: [
 					{
-						label: "Option A has a very long label text to test wrapping of option labels.",
+						label: "Option A has a long label to test wrapping",
 						description: "Description A is also very detailed to test that descriptions are wrapped properly to the left-hand column width.",
 						preview: "Preview A is markdown that will trigger the side-by-side split screen rendering because it has a preview and width is high.",
 					},

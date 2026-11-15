@@ -17,8 +17,8 @@
  *
  * Deliberately does NOT touch:
  *  - Agent/subagent process lifetime (unbounded by design — see
- *    ask_user_question below).
- *  - ask_user_question / ask_supervisor: these are custom tools, not
+ *    ask below).
+ *  - ask / ask_supervisor: these are custom tools, not
  *    `bash`; this hook is scoped to `toolName === "bash"` and cannot see
  *    or affect them. Human questions stay unbounded on purpose, so an
  *    important request from the agent is never missed because the user

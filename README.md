@@ -111,7 +111,7 @@ g.run(initialState);        // required, once
 
 Workflows support two ways to bring external judgment/preferences into a run:
 - **Interactive Nodes (`human(...)`)**: Structural gates defined explicitly in the graph script. The workflow walk pauses at this node and prompts the user.
-- **In-Flight Tools (`ask_user_question`, `ask_supervisor`)**: Tools called by subagents during their execution. `ask_user_question` prompts the user directly (blocks the subagent indefinitely until the user answers — no timeout). `ask_supervisor` lets child subagents ask the main agent for a decision (10-minute timeout, then proceeds autonomously). Subagents must not use these tools to debug errors; those must be escalated via `STATUS: blocked`.
+- **In-Flight Tools (`ask`, `ask_supervisor`)**: Tools called by subagents during their execution. `ask` prompts the user directly (blocks the subagent indefinitely until the user answers — no timeout). `ask_supervisor` lets child subagents ask the main agent for a decision (10-minute timeout, then proceeds autonomously). Subagents must not use these tools to debug errors; those must be escalated via `STATUS: blocked`.
 
 ### Edges
 
@@ -592,7 +592,7 @@ optional. See the bundled agents in `bundled-agents/` for complete, working exam
 name: migrator
 description: Writes database migrations from a schema diff.
 model: claude-sonnet-4
-tools: read, write, edit, bash, grep, ask_supervisor, ask_user_question
+tools: read, write, edit, bash, grep, ask_supervisor, ask
 turnBudget: {"maxTurns": 15, "graceTurns": 2}
 acceptance:
   level: checked
@@ -661,7 +661,7 @@ Agent frontmatter controls model tool access identically for direct subagents an
 
 - Omit `tools` to use all normally available tools (subject to capability ceilings and runtime restrictions).
 - Set `tools: grep, bash, ls` to expose **only** those tools.
-- Add `ask_supervisor` and/or `ask_user_question` explicitly if a restricted agent should ask questions.
+- Add `ask_supervisor` and/or `ask` explicitly if a restricted agent should ask questions.
 - Artifact tools (`plan`, `contract`) and workflow-only `node_state` obey the same allowlist.
 - `tools: []` (or an empty `tools:` field) deliberately exposes no tools.
 
@@ -698,11 +698,31 @@ Answers a pending `ask_supervisor` question from a subagent. Called automaticall
 agent receives a `workflow-agent-question` message — the question and a receipt appear inline so
 the main agent can respond immediately via this tool.
 
-### `ask_user_question`
+### `ask`
 
 Called by a subagent or workflow node to ask the user a question directly. The question appears as
 a TUI dialog; the subagent blocks indefinitely until the user answers (no timeout). Use for
 decisions only the user can make. Do not use to report errors — escalate via `STATUS: blocked`.
+
+`ask` replaces `ask_user_question` without an alias. Update custom agent `tools` and permission
+rules to use `ask`; explicit allowlists are not widened automatically.
+
+The questionnaire supports **1–4 single-select questions**, descriptions, and Markdown option
+previews. Multiple questions use tabs and require a complete final submission. There are no
+multi-select checkboxes, per-option notes, partial submissions, or separate chat-answer kinds.
+Every question includes **Reply in chat**: selecting it closes the choice form and opens a text
+input while the tool remains pending. Type your preference there, or send ordinary Chat View
+text from Moshi. The resulting text is returned as a custom answer, not a preset decision.
+Escape (including cancelling custom text) cancels the entire questionnaire without partial answers.
+
+When an existing local Moshi daemon is available, displayed terminal forms publish native
+`QuestionAsked` / `QuestionResolved` state with the parent Pi session identity, including child
+requests and workflow human gates. No generic approval action is created; answers use Moshi's
+verified terminal-input path. Moshi is optional: no daemon is installed or launched, and a missing
+or unreachable socket does not prevent local answers. `MOSHI_SOCKET_PATH` overrides socket
+discovery. Phone preview payloads are capped at 8 KiB of UTF-8 text per option; terminal previews
+remain scrollable with PgUp/PgDn. Moshi's current Pi adapter rejects multi-select and direct
+free-text form answers, which is why the shared form uses the two-step custom-answer flow.
 
 ### `ask_supervisor`
 
@@ -911,7 +931,7 @@ retain their existing timeout, excluding observed supervisor busy time.
 
 ### Concise human questions
 
-Human-facing prompts are bounded in both `ask_user_question` and workflow `human()` nodes:
+Human-facing prompts are bounded in both `ask` and workflow `human()` nodes:
 
 | Field | Maximum characters |
 |---|---:|
@@ -992,7 +1012,7 @@ did; without one it is marked `skipped` — never `approved`. Silence is not con
 **Worktree isolation** degrades to the project directory when the cwd is not a git repo, rather
 than refusing to run.
 
-**Human questions never time out.** `ask_user_question` blocks the subagent indefinitely — the
+**Human questions never time out.** `ask` blocks the subagent indefinitely — the
 user can take as long as needed. If the subagent run ends before the user answers, the dialog
 closes cleanly. `ask_supervisor` has a 10-minute timeout after which the child proceeds
 autonomously.
@@ -1021,7 +1041,7 @@ subagent that runs an unbounded command (e.g. `find /` searching the entire file
 forever — no further turns fire, so nothing else in the stack (the blank-stop guard, turn budgets)
 ever gets a chance to react. The fix is deliberately narrow: it only fills in `timeout` when the
 model didn't set one — an explicit `timeout` from the model always wins — and it never touches
-agent/process lifetime, `ask_user_question`, or `ask_supervisor` in any way (human questions stay
+agent/process lifetime, `ask`, or `ask_supervisor` in any way (human questions stay
 unbounded, as documented above). When it fires, the model just sees an ordinary tool-result error
 ("Command timed out after 600 seconds"), the same shape as "exited with code 1", and can react —
 not lose the whole session. Set `"bashTimeoutGuard": false` to disable, or `"bashTimeoutSeconds"`

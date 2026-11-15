@@ -28,7 +28,7 @@ import { Type } from "typebox";
 import { ChannelClient, PI_WORKFLOW_NODE_ID_ENV } from "./channel.ts";
 
 // A short timeout: writes/reads resolve as soon as the host's synchronous
-// reduce returns. Unlike ask_user_question (no timeout) or ask_supervisor
+// reduce returns. Unlike ask (no timeout) or ask_supervisor
 // (11 min fallback past the broker's 10-min expiry), node_state has nothing
 // to wait on except the host process, so a generous-but-bounded deadline
 // surfaces a wedged host rather than blocking the agent forever.

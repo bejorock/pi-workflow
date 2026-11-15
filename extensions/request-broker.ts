@@ -2,7 +2,7 @@
  * The request broker.
  *
  * Every request for judgement — whether from a `human()` node in-process or an
- * `ask_user_question` / `ask_supervisor` tool call from a child process — passes
+ * `ask` / `ask_supervisor` tool call from a child process — passes
  * through here. The broker owns the queue, the coalescing window, and the
  * expiry rules; the transports (in-process direct call, filesystem polling)
  * and the sinks (the user's TUI, the main agent's conversation) are adapters.
@@ -142,7 +142,7 @@ export class RequestBroker {
 	/**
 	 * Submits a request and returns a promise that resolves with the answer.
 	 *
-	 * The caller (a `human()` node, an `ask_user_question` tool, an `ask_supervisor`
+	 * The caller (a `human()` node, an `ask` tool, an `ask_supervisor`
 	 * tool) blocks on this promise — which is correct, because a question is
 	 * asked by the thing that needs the answer, and it should not proceed
 	 * until it has one.

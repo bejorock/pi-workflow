@@ -128,7 +128,7 @@ export interface ChannelReply {
 // ── Child side: write requests, poll for replies ────────────────────────
 
 /**
- * Child-side client. Used by `ask_user_question` and `ask_supervisor` tool
+ * Child-side client. Used by `ask` and `ask_supervisor` tool
  * implementations running inside a subagent process.
  */
 export class ChannelClient {

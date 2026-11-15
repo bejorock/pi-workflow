@@ -1,12 +1,12 @@
 ---
 name: monitor
 description: Independently reviews a plan for feasibility before implementation starts. Read-only gate.
-tools: read, grep, find, ls, ask_supervisor, ask_user_question, node_state
+tools: read, grep, find, ls, ask_supervisor, ask, node_state
 defaultContext: fork
 acceptanceRole: read-only
 turnBudget: {"maxTurns": 10, "graceTurns": 2}
 permission:
-  ask_user_question: allow
+  ask: allow
   ask_supervisor: allow
   node_state: allow
 ---

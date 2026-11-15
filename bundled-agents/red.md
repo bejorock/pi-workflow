@@ -1,14 +1,14 @@
 ---
 name: red
 description: Writes failing tests that encode the contract, before implementation exists. TDD red phase.
-tools: read, write, bash, grep, find, ls, ask_supervisor, ask_user_question, node_state
+tools: read, write, bash, grep, find, ls, ask_supervisor, ask, node_state
 defaultContext: fork
 acceptanceRole: writer
 turnBudget: {"maxTurns": 15, "graceTurns": 3}
 acceptance:
   level: checked
 permission:
-  ask_user_question: allow
+  ask: allow
   ask_supervisor: allow
   node_state: allow
 ---

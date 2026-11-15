@@ -109,7 +109,7 @@ describe("pi-args", () => {
 		});
 
 		it("includes coordination and artifact tools only when explicitly listed", () => {
-			const tools = ["grep", "bash", "ls", "ask_supervisor", "ask_user_question", "plan", "contract", "node_state"];
+			const tools = ["grep", "bash", "ls", "ask_supervisor", "ask", "plan", "contract", "node_state"];
 			expect(resolvePiLaunchToolPlan({ tools }).effectiveToolAllowlist).toEqual(tools);
 			expect(resolvePiLaunchToolPlan({ tools: ["grep", "bash", "ls"] }).effectiveToolAllowlist).toEqual(["grep", "bash", "ls"]);
 			expect(resolvePiLaunchToolPlan({ tools: [], structuredOutput: true }).effectiveToolAllowlist).toEqual(["structured_output"]);

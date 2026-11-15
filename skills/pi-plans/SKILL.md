@@ -72,7 +72,7 @@ The id is auto-derived from the name as a URL slug (e.g. `"Refactor Auth"` → `
 ## Asking the Human About a Plan
 
 Keep detailed rationale, findings, and alternatives **in the plan**, not in a question dialog.
-`ask_user_question` and workflow `human()` enforce: question/expanded prompt **240 characters**,
+`ask` and workflow `human()` enforce: question/expanded prompt **240 characters**,
 tab header **12**, option label **60** (prefer 1–5 words), and option description **160**.
 Overlong text is rejected, not silently shortened. Document contents and Markdown previews are not
 subject to these question-text caps; neither are user answers or `ask_supervisor` coordination.

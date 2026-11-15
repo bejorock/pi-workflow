@@ -1,5 +1,5 @@
 /**
- * Tests for ask_user_question and ask_supervisor tools.
+ * Tests for ask and ask_supervisor tools.
  */
 
 import * as fs from "node:fs";
@@ -20,7 +20,7 @@ import {
 } from "../extensions/channel.ts";
 
 describe("Ask Tools in Parent Process (direct UI calling)", () => {
-	it("ask_user_question calls custom TUI when in tui mode", async () => {
+	it("ask calls custom TUI when in tui mode", async () => {
 		const custom = vi.fn().mockImplementation((fn) => {
 			const done = vi.fn();
 			const tui = { requestRender: vi.fn() };
@@ -69,7 +69,7 @@ describe("Ask Tools in Parent Process (direct UI calling)", () => {
 		expect(res.details.cancelled).toBe(false);
 	});
 
-	it("ask_user_question routes a parent request through the supplied broker", async () => {
+	it("ask routes a parent request through the supplied broker", async () => {
 		const broker = new RequestBroker({ coalesceMs: 0 });
 		broker.onBatch((requests) => {
 			expect(requests).toHaveLength(1);
@@ -98,7 +98,7 @@ describe("Ask Tools in Parent Process (direct UI calling)", () => {
 		});
 	});
 
-	it("ask_user_question validation failure", async () => {
+	it("ask validation failure", async () => {
 		const tool = createAskUserQuestionTool();
 		const res: any = await tool.execute(
 			"call-1",
@@ -146,7 +146,7 @@ describe("Ask Tools in Child Process (filesystem channel routing)", () => {
 		fs.rmSync(tmpDir, { recursive: true, force: true });
 	});
 
-	it("ask_user_question routes request to channel and receives answer", async () => {
+	it("ask routes request to channel and receives answer", async () => {
 		poller = new ChannelPoller(chDir, {
 			onRequest: (req) => {
 				expect(req.kind).toBe("human");

@@ -54,15 +54,15 @@ async function startChild(tools?: string[], structured = false) {
 describe("real child tool allowlists", () => {
 	it.each([
 		["ordinary restricted tools", ["grep", "bash", "ls"]],
-		["explicit question and artifact tools", ["grep", "ask_supervisor", "ask_user_question", "plan", "contract", "node_state"]],
+		["explicit question and artifact tools", ["grep", "ask_supervisor", "ask", "plan", "contract", "node_state"]],
 		["no tools", []],
 	] as const)("keeps %s authoritative after startup and mode changes", async (_name, names) => {
 		const tools: string[] = [...names];
 		const { session, launch } = await startChild(tools);
 		expect(session.getActiveToolNames().sort()).toEqual([...tools].sort());
 		// Simulate a later extension or mode change trying to widen model access.
-		session.setActiveToolsByName([...tools, "ask_supervisor", "ask_user_question", "plan", "contract", "node_state", "workflow"]);
-		for (const toolName of ["ask_supervisor", "ask_user_question", "plan", "contract", "node_state", "workflow"]) {
+		session.setActiveToolsByName([...tools, "ask_supervisor", "ask", "plan", "contract", "node_state", "workflow"]);
+		for (const toolName of ["ask_supervisor", "ask", "plan", "contract", "node_state", "workflow"]) {
 			const result = await session.extensionRunner.emitToolCall({
 				type: "tool_call", toolCallId: "policy-check", toolName, input: {},
 			});
@@ -86,7 +86,7 @@ describe("real child tool allowlists", () => {
 
 	it("retains default workflow tools when tools is omitted", async () => {
 		const { session } = await startChild();
-		expect(session.getActiveToolNames()).toEqual(expect.arrayContaining(["read", "ask_supervisor", "ask_user_question", "plan", "contract", "node_state"]));
+		expect(session.getActiveToolNames()).toEqual(expect.arrayContaining(["read", "ask_supervisor", "ask", "plan", "contract", "node_state"]));
 	});
 
 	it("ignores a parent's policy outside a child and rejects malformed child policy", () => {

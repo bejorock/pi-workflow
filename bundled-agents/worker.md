@@ -1,14 +1,14 @@
 ---
 name: worker
 description: General-purpose implementation agent for tasks that don't need a full TDD pipeline.
-tools: read, write, edit, bash, grep, find, ls, ask_supervisor, ask_user_question, node_state
+tools: read, write, edit, bash, grep, find, ls, ask_supervisor, ask, node_state
 defaultContext: fork
 acceptanceRole: writer
 turnBudget: {"maxTurns": 20, "graceTurns": 4}
 acceptance:
   level: checked
 permission:
-  ask_user_question: allow
+  ask: allow
   ask_supervisor: allow
   node_state: allow
 ---

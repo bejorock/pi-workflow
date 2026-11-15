@@ -40,7 +40,7 @@ describe("bundled agents", () => {
 		const { agents } = discoverAgents("/nonexistent-project", "project");
 		const green = agents.find((a) => a.name === "green")!;
 
-		expect(green.tools).toEqual(["read", "write", "edit", "bash", "grep", "find", "ls", "ask_supervisor", "ask_user_question", "node_state"]);
+		expect(green.tools).toEqual(["read", "write", "edit", "bash", "grep", "find", "ls", "ask_supervisor", "ask", "node_state"]);
 		expect(green.defaultContext).toBe("fork");
 		expect(green.acceptanceRole).toBe("writer");
 		// Regression: inline-map frontmatter must decode to an object, not throw.
@@ -51,7 +51,7 @@ describe("bundled agents", () => {
 	it("explicitly grants bundled roles their coordination and artifact tools", () => {
 		const { agents } = discoverAgents("/nonexistent-project", "project");
 		for (const agent of agents) {
-			expect(agent.tools).toEqual(expect.arrayContaining(["ask_supervisor", "ask_user_question", "node_state"]));
+			expect(agent.tools).toEqual(expect.arrayContaining(["ask_supervisor", "ask", "node_state"]));
 		}
 		expect(agents.find(a => a.name === "planner")?.tools).toContain("plan");
 		expect(agents.find(a => a.name === "architect")?.tools).toContain("contract");

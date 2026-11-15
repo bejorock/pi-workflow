@@ -2,7 +2,7 @@
  * Tool definitions for user and supervisor communication.
  *
  * Implements:
- *  - ask_user_question: batched multi-question custom TUI, registered for both
+ *  - ask: batched multi-question custom TUI, registered for both
  *    parent and child agents.
  *  - ask_supervisor: lets child agents ask the main agent for decisions.
  */
@@ -18,20 +18,20 @@ import {
 import { ChannelClient } from "./channel.ts";
 import type { RequestBroker } from "./request-broker.ts";
 import { QUESTION_LIMITS } from "./question-limits.ts";
+import { CHAT_REPLY_LABEL, questionChoices } from "./moshi-questions.ts";
 
 // ── Schemas ──────────────────────────────────────────────────────────────
 
 const TUIOptionSchema = Type.Object({
 	label: Type.String({ maxLength: QUESTION_LIMITS.label, description: "Concise option label, ideally 1–5 words; max 60 characters" }),
 	description: Type.Optional(Type.String({ maxLength: QUESTION_LIMITS.description, description: "Short trade-off summary, max 160 characters; use preview for details" })),
-	preview: Type.Optional(Type.String({ description: "Markdown preview text shown beside/below options" })),
+	preview: Type.Optional(Type.String({ description: "Markdown preview for this option (phone payload capped at 8 KiB)" })),
 });
 
 const TUIQuestionSchema = Type.Object({
 	question: Type.String({ maxLength: QUESTION_LIMITS.question, description: "Clear question ending with ?, max 240 characters; keep background in previews or documents" }),
 	header: Type.String({ maxLength: QUESTION_LIMITS.header, description: "Short topic label, max 12 characters (e.g. Auth method)" }),
 	options: Type.Optional(Type.Array(TUIOptionSchema, { description: "Options to choose from" })),
-	multiSelect: Type.Optional(Type.Boolean({ description: "Allow multiple selections" })),
 });
 
 const AskUserQuestionParams = Type.Object({
@@ -67,27 +67,26 @@ function formatToolResultText(
 				const q = questions[ans.questionIndex];
 				const header = q ? q.header : `Question ${ans.questionIndex + 1}`;
 				const value = ans.answer ?? "(no answer)";
-				const noteSuffix = ans.notes ? ` (Note: ${ans.notes})` : "";
-				return `- ${header}: ${value}${noteSuffix}`;
+				return `- ${header}: ${value}`;
 			})
 			.join("\n")
 	);
 }
 
 /**
- * The `ask_user_question` tool.
+ * The `ask` tool.
  *
- * Full-parity custom TUI questionnaire. Child agents route through the
+ * Native-compatible custom TUI questionnaire. Child agents route through the
  * filesystem channel; a parent may use the shared RequestBroker so optional
  * external interaction sinks receive the same request as the local TUI.
  */
 export function createAskUserQuestionTool(broker?: RequestBroker): ToolDefinition {
 	return defineTool({
-		name: "ask_user_question",
-		label: "Ask User Question",
+		name: "ask",
+		label: "Ask",
 		description:
 			"Ask the user one or more questions. Can specify options (with descriptions and markdown previews), " +
-			"multi-select mode, per-option notes, and a free-text 'Other' choice. Renders a unified tabbed dialog.",
+			"single-select choices, and a built-in 'Reply in chat' path for custom answers. Do not include that reserved choice yourself; omit options for a custom-only question. All questions must be answered; notes and multi-select are not supported.",
 		parameters: AskUserQuestionParams,
 
 		async execute(_id, params, _signal, _onUpdate, ctx) {
@@ -113,7 +112,7 @@ export function createAskUserQuestionTool(broker?: RequestBroker): ToolDefinitio
 					questions: questions.map((q) => ({
 						question: q.question,
 						header: q.header,
-						options: q.options?.map((o) => ({ label: o.label, description: o.description })),
+						options: q.options?.map((o) => ({ label: o.label, description: o.description, preview: o.preview })),
 						multiSelect: q.multiSelect,
 					})),
 				});
@@ -140,13 +139,27 @@ export function createAskUserQuestionTool(broker?: RequestBroker): ToolDefinitio
 			// validation and the child check: it preserves the existing tool schema
 			// while making direct parent asks visible to optional interaction sinks.
 			if (broker) {
-				const result = await broker.ask({
-					id: `parent-ask:${_id}`,
-					runId: "parent",
-					kind: "human",
-					questions,
-					expectsReply: true,
-				});
+				const id = `parent-ask:${_id}`;
+				const cancel = () => broker.cancel(id, "Question tool interrupted.");
+				if (_signal?.aborted) {
+					return {
+						content: [{ type: "text" as const, text: "User cancelled the question." }],
+						details: { answers: [], cancelled: true },
+					};
+				}
+				_signal?.addEventListener("abort", cancel, { once: true });
+				let result;
+				try {
+					result = await broker.ask({
+						id,
+						runId: "parent",
+						kind: "human",
+						questions,
+						expectsReply: true,
+					});
+				} finally {
+					_signal?.removeEventListener("abort", cancel);
+				}
 				const cancelled = result.source === "cancelled" || result.source === "timeout";
 				const answers = result.answers?.questions ?? [];
 				return {
@@ -161,7 +174,7 @@ export function createAskUserQuestionTool(broker?: RequestBroker): ToolDefinitio
 
 			// 4. Parent process: direct TUI fallback (used without a broker)
 			if (ctx.mode === "tui" && ctx.ui) {
-				const result = await runAskUserQuestionTUI(ctx, questions);
+				const result = await runAskUserQuestionTUI(ctx, questions, _signal, _id);
 				return {
 					content: [
 						{
@@ -183,13 +196,15 @@ export function createAskUserQuestionTool(broker?: RequestBroker): ToolDefinitio
 					if (q.options && q.options.length > 0) {
 						ans = await ctx.ui.select(
 							`${q.question} (${i + 1}/${questions.length})`,
-							q.options.map((o) => o.label),
+							questionChoices(q).map((o) => o.label),
 						);
 					} else {
 						ans = await ctx.ui.input(`${q.question} (${i + 1}/${questions.length})`);
 					}
 
-					if (ans === undefined) {
+					const custom = !q.options || ans === CHAT_REPLY_LABEL;
+					if (ans === CHAT_REPLY_LABEL) ans = await ctx.ui.input(`${q.header}: your answer`, "Describe what you prefer instead", {signal: _signal});
+					if (ans === undefined || _signal?.aborted) {
 						return {
 							content: [{ type: "text" as const, text: "User cancelled the question." }],
 							details: { answers: [], cancelled: true },
@@ -198,7 +213,7 @@ export function createAskUserQuestionTool(broker?: RequestBroker): ToolDefinitio
 
 					answers.push({
 						questionIndex: i,
-						kind: q.options ? "option" : "custom",
+						kind: custom ? "custom" : "option",
 						answer: ans || null,
 					});
 				}

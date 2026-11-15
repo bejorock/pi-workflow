@@ -70,7 +70,7 @@ export interface GraphRunOptions {
 	 */
 	makeRunNode: (context: GraphRunContext) => NodeRunner;
 	display?: GraphDisplayBridge;
-	/** The broker carries judgement requests. Present when background runs need ask_user_question/ask_supervisor. */
+	/** The broker carries judgement requests. Present when background runs need ask/ask_supervisor. */
 	broker?: RequestBroker;
 	onNodeStart?: (info: { step: number; nodeId: string; nodeType: string; round?: number }) => void;
 	onNodeComplete?: (execution: NodeExecution) => void;

@@ -198,7 +198,7 @@ contract(action: "propose", id: "auth-api-v2")
 ## Asking the Human About a Contract
 
 Keep the specification and trade-offs **in the contract**, not in a question dialog.
-`ask_user_question` and workflow `human()` enforce: question/expanded prompt **240 characters**,
+`ask` and workflow `human()` enforce: question/expanded prompt **240 characters**,
 tab header **12**, option label **60** (prefer 1–5 words), and option description **160**.
 Overlong text is rejected, not silently shortened. Contract contents and Markdown previews are not
 subject to these question-text caps; neither are user answers or `ask_supervisor` coordination.

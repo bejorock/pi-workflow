@@ -17,6 +17,7 @@ import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { RequestBroker, PendingRequest, BrokerResult } from "./request-broker.ts";
 import { runAskUserQuestionTUI } from "./ask-user-question-tui.ts";
+import { CHAT_REPLY_LABEL, questionChoices } from "./moshi-questions.ts";
 import type { WorkflowController } from "./workflow-controller.ts";
 import { installRelayHookSink } from "./relay-hook.ts";
 
@@ -33,13 +34,14 @@ export interface BrokerSinkOptions {
 export function installBrokerSinks(options: BrokerSinkOptions): void {
 	const { pi, broker } = options;
 	const relay = installRelayHookSink(pi, broker);
+	let humanQueue = Promise.resolve();
 
 	broker.onBatch((batch) => {
 		const human = batch.filter((r) => r.kind === "human");
 		relay.offer(human);
 		const supervisor = batch.filter((r) => r.kind === "supervisor");
 
-		if (human.length > 0) void handleHumanBatch(pi, broker, human);
+		if (human.length > 0) humanQueue = humanQueue.then(() => handleHumanBatch(pi, broker, human)).catch(() => {});
 		if (supervisor.length > 0) void handleSupervisorBatch(pi, broker, supervisor, options.controller);
 	});
 
@@ -69,9 +71,9 @@ async function handleHumanBatch(
 		// 1. TUI Mode: Renders custom batch questionnaire dialog
 		if (ctx.mode === "tui") {
 			try {
-				const result = await runAskUserQuestionTUI(ctx, request.questions, broker.signalFor(request.id));
-				if (result.cancelled) {
-					broker.cancel(request.id, "Dismissed by the user.");
+				const result = await runAskUserQuestionTUI(ctx, request.questions, broker.signalFor(request.id), request.id);
+				if (result.cancelled || result.error) {
+					broker.cancel(request.id, result.error ?? "Dismissed by the user.");
 				} else {
 					broker.resolve(request.id, {
 						source: "human",
@@ -102,7 +104,7 @@ async function handleHumanBatch(
 					let answer: string | undefined;
 
 					if (q.options && q.options.length > 0) {
-						const labels = q.options.map((o) => o.label);
+						const labels = questionChoices(q).map((o) => o.label);
 						answer = await ctx.ui.select(
 							`${q.question} (${i + 1}/${request.questions.length}) [run: ${shortId(request.runId)}]`,
 							labels,
@@ -114,6 +116,8 @@ async function handleHumanBatch(
 						);
 					}
 
+					const custom = !q.options || answer === CHAT_REPLY_LABEL;
+					if (answer === CHAT_REPLY_LABEL) answer = await ctx.ui.input(`${q.header}: your answer`, "Describe what you prefer instead", {signal: broker.signalFor(request.id)});
 					if (answer === undefined || answer === "") {
 						cancelled = true;
 						break;
@@ -121,7 +125,7 @@ async function handleHumanBatch(
 
 					answers.push({
 						questionIndex: i,
-						kind: q.options ? "option" : "custom",
+						kind: custom ? "custom" : "option",
 						answer: answer || null,
 					});
 				}

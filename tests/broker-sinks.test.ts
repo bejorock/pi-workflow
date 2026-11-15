@@ -62,6 +62,22 @@ describe("Broker Sinks", () => {
 		expect(reply.answers?.questions).toEqual(resultAnswers);
 	});
 
+	it("serializes dialogs across separate broker batches", async () => {
+		let finishFirst!: (value: any) => void;
+		vi.mocked(runAskUserQuestionTUI).mockImplementationOnce(() => new Promise(resolve => { finishFirst = resolve; }))
+			.mockResolvedValueOnce({answers: [{questionIndex: 0, kind: "option", answer: "second"}], cancelled: false});
+		setBrokerContext({mode: "tui", hasUI: true, ui: {}} as unknown as ExtensionContext);
+		const first = broker.ask({runId: "r1",kind: "human",questions:[{question:"First?",header:"First"}],expectsReply:true});
+		broker.tick(); await Promise.resolve();
+		const second = broker.ask({runId: "r2",kind: "human",questions:[{question:"Second?",header:"Second"}],expectsReply:true});
+		broker.tick(); await Promise.resolve();
+		expect(runAskUserQuestionTUI).toHaveBeenCalledTimes(1);
+		finishFirst({answers:[{questionIndex:0,kind:"option",answer:"first"}],cancelled:false});
+		expect((await first).text).toBe("first");
+		expect((await second).text).toBe("second");
+		expect(runAskUserQuestionTUI).toHaveBeenCalledTimes(2);
+	});
+
 	it("falls back to sequential prompts in non-TUI mode with UI", async () => {
 		const select = vi.fn().mockResolvedValue("yes");
 		const ctx = {

@@ -956,7 +956,7 @@ export default function (pi: ExtensionAPI) {
 	// Graph-based coordination: nodes are agents, edges decide where each
 	// result goes next. Replaces the imperative agent()/parallel() script.
 	//
-	// The broker carries judgement requests between processes. ask_user_question,
+	// The broker carries judgement requests between processes. ask,
 	// ask_supervisor, and (after re-routing) the human() node all pass through
 	// here. The sinks route each request to whoever can answer it: the user's
 	// TUI for human questions, the main agent's conversation for supervisor ones.
@@ -1464,7 +1464,7 @@ export default function (pi: ExtensionAPI) {
 	// --- Bash-timeout guard: default timeout on unbounded `bash` calls ---
 	// Same factory-level, read-once-at-process-start rationale as the
 	// blank-stop guard above. Scoped to the `bash` tool only — never touches
-	// ask_user_question/ask_supervisor or agent/process lifetime. See
+	// ask/ask_supervisor or agent/process lifetime. See
 	// bash-timeout-guard.ts for the full incident writeup and design notes.
 	registerBashTimeoutGuard(pi, {
 		enabled: blankStopSettings.bashTimeoutGuard !== false,
@@ -1484,7 +1484,7 @@ export default function (pi: ExtensionAPI) {
 		if (!active.includes("workflow_reply")) toActivate.push("workflow_reply");
 		if (!active.includes("workflow_wait")) toActivate.push("workflow_wait");
 		if (!active.includes("subagent")) toActivate.push("subagent");
-		if (!active.includes("ask_user_question")) toActivate.push("ask_user_question");
+		if (!active.includes("ask")) toActivate.push("ask");
 		if (!active.includes("ask_supervisor")) toActivate.push("ask_supervisor");
 		if (!active.includes("subagent_wait")) toActivate.push("subagent_wait");
 		if (!active.includes("plan")) toActivate.push("plan");
