@@ -46,11 +46,18 @@ export interface GraphRunReport {
 	budget: ReturnType<GraphRunContext["summary"]>["budget"];
 }
 
+export interface BudgetPolicy {
+	onLimit: "pause_before_next_node";
+	perNodeTokens?: number;
+	maxToolCalls?: number;
+}
 export interface GraphRunOptions {
+	budgetPolicy?: BudgetPolicy;
 	runId: string;
 	cwd: string;
 	script: string;
 	scriptHash: string;
+	sourcePath?: string;
 	meta: WorkflowMeta & { name: string; description: string };
 	graph: GraphScriptResult["graph"];
 	journalDir: string;
@@ -79,7 +86,7 @@ export interface GraphRunOptions {
 
 function summariseResult(value: unknown, limit = 400): string {
 	if (value === null || value === undefined) return "(no result)";
-	const text = typeof value === "string" ? value : String(value);
+	const text = typeof value === "string" ? value : typeof value === "object" ? JSON.stringify(value) : String(value);
 	const collapsed = text.replace(/\s+/g, " ").trim();
 	return collapsed.length <= limit ? collapsed : `${collapsed.slice(0, limit - 1)}…`;
 }
@@ -277,11 +284,13 @@ export async function executeGraphRun(options: GraphRunOptions): Promise<GraphRu
 		journalDir,
 		runId,
 		scriptHash,
+		sourcePath: options.sourcePath,
 		name: meta.name,
 		description: meta.description,
 		entry: graph.entry,
 		nodeIds,
 		initialState: graph.initialState,
+		resume: Boolean(options.resume),
 	});
 	} catch (error) {
 		context.cleanup();
@@ -320,6 +329,13 @@ export async function executeGraphRun(options: GraphRunOptions): Promise<GraphRu
 			signal: options.signal,
 			maxIterations: options.maxIterations,
 			resume: options.resume,
+			shouldPause: options.budgetPolicy ? history => {
+				const tokens = history.reduce((sum, node) => sum + (node.tokens ?? 0), 0);
+				const calls = history.reduce((sum, node) => sum + (node.toolCalls ?? 0), 0);
+				return (options.tokenBudget !== undefined && tokens >= options.tokenBudget) ||
+					(options.budgetPolicy!.perNodeTokens !== undefined && history.some(node => (node.tokens ?? 0) >= options.budgetPolicy!.perNodeTokens!)) ||
+					(options.budgetPolicy!.maxToolCalls !== undefined && calls >= options.budgetPolicy!.maxToolCalls);
+			} : undefined,
 			runNode,
 			onNodeStart,
 			onNodeComplete,
@@ -373,13 +389,22 @@ export async function executeGraphRun(options: GraphRunOptions): Promise<GraphRu
 			? `Graph "${meta.name}" completed in ${completedSummary}.`
 			: result.status === "max_iterations"
 				? `Graph "${meta.name}" stopped at the round cap.`
-				: `Graph "${meta.name}" aborted.`;
+				: result.status === "paused" ? `Graph "${meta.name}" paused at a budget checkpoint after ${completedSummary}.` : `Graph "${meta.name}" aborted.`;
 	lines.push(heading);
 
 	if (result.error) lines.push(`\n${result.error}`);
 
 	lines.push(`\nPath: ${formatPath(result)}`);
 	lines.push(`\nNodes:\n${formatHistory(result.history)}`);
+	const measured = result.history.filter(node => node.usage);
+	if (measured.length) {
+		lines.push("\nAccounting (cache tokens are not equivalent to newly billed input; cost may be unknown):");
+		for (const node of measured) {
+			const usage = node.usage!;
+			lines.push(`  ${node.nodeId}#${node.step}: input=${usage.input}, cacheRead=${usage.cacheRead}, cacheWrite=${usage.cacheWrite}, output=${usage.output}, tools=${node.toolCalls ?? "unknown"}, time=${node.durationMs}ms, cost=${usage.cost === undefined ? "unknown" : usage.cost}`);
+		}
+		lines.push(`  Current invocation wall clock=${result.durationMs}ms; cumulative node time=${result.history.reduce((sum, node) => sum + node.durationMs, 0)}ms (parallel work overlaps; resumed history includes earlier invocations).`);
+	}
 
 	const escalations = formatEscalations(result.state);
 	if (escalations) {

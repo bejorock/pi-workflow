@@ -63,6 +63,35 @@ another idle grace, the human receives one notification (no modal and no automat
 Reply, stop, cancellation, or expiry clears reminder tracking; each new request starts fresh.
 Controlled graph supervisor requests do not expire on a wall-clock timer during investigation.
 
+## Reliable execution and inspection
+
+- Prefer `workflow({file: "path/graph.js"})` for large graphs; exactly one of `script`, `file`,
+  `loadWorkflow` is allowed. `.ts` files must currently contain JavaScript-compatible syntax.
+  File content gets an exact SHA-256; do not change source when resuming.
+- Default joins require every predecessor. For an alternative-branch merge explicitly declare
+  `g.join("report", "selected")`. True selected parallel predecessors still all have to finish.
+  Run `workflow_validate({script, scenarios:[{nodeId: stubResult}]})` before costly execution;
+  it does not run agents, commands or fn bodies and cannot prove all arbitrary callback routes.
+- Delivery completion is not engine completion, and engine completion is not reviewer acceptance.
+  Inspect `details.runStatus`, actual execution paths, and explicit application verdict data.
+- Optional `agent(name, promptFn, {outputSchema, requiredTools, handoff, maxHandoffChars, dependencies})`
+  contracts validate structured completion into `result.data`, preflight required tools (never grant
+  them), project named state fields, preserve full oversize handoffs as artifacts, and verify exact
+  SHA-256 file dependencies before dispatch/resume. Keep schema payloads compact.
+- `budgetPolicy: {onLimit:"pause_before_next_node", perNodeTokens?, maxToolCalls?}` opts into
+  checkpointing at the next wave barrier, optionally against `tokenBudget`. A wave can overshoot;
+  running edits are not interrupted. Resume the same source/run ID with a revised or omitted policy.
+  A settled budget checkpoint releases the controller slot; live UI pause remains an active run.
+- `workflow_status({runId,nodeId,step?,fields:["result.data","usage"],offset?,limit?})` works
+  live and after restart. Distinguish node ID from execution visit. Oversize entries are explicitly
+  omitted; narrow fields or inspect the journal/session artifact. Cost may be unknown; cache tokens
+  are not newly billed input. Diagnostics expose phase/activity/stream bytes without inventing
+  unavailable provider IDs or changed-file evidence.
+- For schema-invalid completion metadata only, `workflow_correct_result({runId,step,value})`
+  validates and journals a correction. It never reruns implementation/tools, overrides technical
+  failures, replays routing, or retroactively accepts the application. Do not rerun writes merely
+  to repair a verdict JSON object. Further execution is an explicit decision.
+
 ## How to Run a Workflow
 
 The `workflow` tool runs a **graph** of coordinating agents: nodes are agents, edges decide where

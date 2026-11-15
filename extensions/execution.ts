@@ -457,6 +457,9 @@ async function runSingleAttempt(
 	};
 	// Cover provider requests that never emit message_start as well as long streams.
 	armGeneration();
+	result.diagnostics = {phase: "provider", streamBytes: 0, argumentBytes: 0, changeEvidence: "unknown"};
+	progress.diagnostics = result.diagnostics;
+	let lastProgressAt = 0;
 	proc.once("close", () => { clearGeneration(); if (settledDrain) clearTimeout(settledDrain); });
 
 	const stdoutReader = createBoundedLineReader({
@@ -464,6 +467,21 @@ async function runSingleAttempt(
 		onLine: (line) => {
 			try {
 				const event = JSON.parse(line);
+				const diagnostics = result.diagnostics!;
+				diagnostics.lastEventAt = Date.now();
+				diagnostics.streamBytes += Buffer.byteLength(line);
+				progress.lastActivityAt = diagnostics.lastEventAt;
+				if (event.type === "message_start" && event.message?.role === "assistant") diagnostics.phase = "generation";
+				if (event.type === "message_update") {
+					diagnostics.lastProviderResponseAt = Date.now();
+					const delta = event.assistantMessageEvent;
+					if (delta?.type === "toolcall_delta" && typeof delta.delta === "string") diagnostics.argumentBytes += Buffer.byteLength(delta.delta);
+				}
+				if (typeof event.requestId === "string") diagnostics.providerRequestId = event.requestId.slice(0, 200);
+				if (event.type === "tool_execution_start") diagnostics.phase = event.toolName === "ask" ? "human_wait" : event.toolName === "ask_supervisor" ? "supervisor_wait" : "tool";
+				if (event.type === "tool_execution_end" && activeTools <= 1) diagnostics.phase = "provider";
+				if (event.type === "agent_settled") diagnostics.phase = "settled";
+				if (event.type === "message_end" && event.message?.role === "assistant") diagnostics.lastProviderResponseAt = Date.now();
 				options.onEvent?.(event);
 				if (event.type === "tool_execution_start") activeTools++;
 				if (event.type === "tool_execution_end") activeTools = Math.max(0, activeTools - 1);
@@ -480,7 +498,20 @@ async function runSingleAttempt(
 					result.stopReason = "error";
 				}
 				if (event.type === "turn_end") {
-					result.usage = event.message?.usage || result.usage;
+					if (event.message?.usage) {
+						const source = event.message.usage;
+						const cost = source.cost;
+						const amount = typeof cost === "number" ? cost : cost?.total;
+						result.usage.input += source.input ?? 0;
+						result.usage.output += source.output ?? 0;
+						result.usage.cacheRead += source.cacheRead ?? 0;
+						result.usage.cacheWrite += source.cacheWrite ?? 0;
+						result.usage.totalTokens = (result.usage.totalTokens ?? 0) + (source.totalTokens ?? ((source.input ?? 0) + (source.output ?? 0) + (source.cacheRead ?? 0) + (source.cacheWrite ?? 0)));
+						const known = typeof amount === "number" && (amount > 0 || cost?.totalFromProvider === true);
+						result.usage.costKnown = (result.usage.costKnown ?? true) && known;
+						if (known) result.usage.cost += amount;
+						result.usage.turns++;
+					}
 					result.stopReason = event.message?.stopReason || "end";
 					// pi's real TurnEndEvent carries `turnIndex` (0-based), not
 					// `turnCount` — turnIndex + 1 is the number of turns completed
@@ -488,7 +519,7 @@ async function runSingleAttempt(
 					// fixtures/tests that predate this fix; real pi never sets it.)
 					if (typeof event.turnIndex === "number") progress.turnCount = event.turnIndex + 1;
 					else if (event.turnCount !== undefined) progress.turnCount = event.turnCount;
-					progress.tokens = (result.usage?.input ?? 0) + (result.usage?.output ?? 0);
+					progress.tokens = result.usage?.totalTokens ?? ((result.usage?.input ?? 0) + (result.usage?.output ?? 0));
 					if (turnBudget && !turnBudgetExceededFired && (progress.turnCount ?? 0) >= turnBudget.maxTurns + turnBudget.graceTurns) {
 						// Hard backstop: the child-side soft-block (subagent-prompt-runtime.ts)
 						// should already have stopped the model from calling further tools at
@@ -553,13 +584,15 @@ async function runSingleAttempt(
 				shared.jsonlWriter?.write({ type: "child_event", event, ts: Date.now() });
 				if (
 					options.onProgress &&
-					(event.type === "tool_execution_start" ||
+					((event.type === "message_update" && Date.now() - lastProgressAt >= 1000) ||
+						event.type === "tool_execution_start" ||
 						event.type === "tool_execution_end" ||
 						event.type === "turn_end" ||
 						event.type === "message_end")
 				) {
 					progress.durationMs = Date.now() - startTime;
 					progress.lastActivityAt = Date.now();
+					lastProgressAt = Date.now();
 					options.onProgress(snapshotProgress(progress));
 				}
 			} catch {
@@ -650,6 +683,10 @@ async function runSingleAttempt(
 						shared.transcriptWriter?.close();
 
 						// Snapshot for the callback — the caller gets the real final result
+						if (result.diagnostics && (result.exitCode !== 0 || result.error || result.errorMessage)) {
+							result.diagnostics.failureKind = generationExpired || result.timedOut ? "timeout" : options.signal?.aborted ? "cancelled" : result.protocolError ? "protocol" : result.errorMessage ? "provider" : "process";
+							result.diagnostics.resumeAdvice = "Inspect partial output, changed files and dependency hashes before explicit resume. No writes were retried automatically.";
+						}
 						const finalResult = snapshotResult(result, snapshotProgress(progress));
 						finalResult.detached = undefined;
 						finalResult.detachedReason = "supervisor request";
@@ -780,6 +817,15 @@ async function runSingleAttempt(
 		if (acceptanceLedger.status === "rejected") {
 			result.error = acceptanceFailureMessage(acceptanceLedger);
 		}
+	}
+
+	if (result.exitCode !== 0 && !result.error && !result.errorMessage) {
+		const stderr = stderrReader.text().trim();
+		if (stderr) result.error = stderr;
+	}
+	if (result.diagnostics && (result.exitCode !== 0 || result.error || result.errorMessage)) {
+		result.diagnostics.failureKind = generationExpired || result.timedOut ? "timeout" : options.signal?.aborted ? "cancelled" : result.protocolError ? "protocol" : result.errorMessage ? "provider" : "process";
+		result.diagnostics.resumeAdvice = "Inspect partial output, changed files and dependency hashes before explicit resume. No writes were retried automatically.";
 	}
 
 	// Write artifacts

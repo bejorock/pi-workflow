@@ -546,6 +546,8 @@ export class WorkflowManager extends EventEmitter {
 		if (!run || run.status !== "running") return false;
 
 		run.status = "paused";
+		run.snapshot.status = "paused";
+		run.snapshot.durationMs = Date.now() - run.startedAt;
 		run.updatedAt = Date.now();
 		this.emit("paused", { runId });
 		return true;
@@ -556,6 +558,7 @@ export class WorkflowManager extends EventEmitter {
 		if (!run || run.status !== "paused") return false;
 
 		run.status = "running";
+		run.snapshot.status = "running";
 		run.updatedAt = Date.now();
 		this.emit("resumed", { runId });
 		return true;
@@ -668,7 +671,7 @@ function parsePersistedJournal(filePath: string, runId: string): PersistedRun | 
 		if (lines.length === 0) return undefined;
 
 		let workflowName = "workflow";
-		let status: RunStatus = "completed";
+		let status: RunStatus = "running";
 		const agents: WorkflowAgentSnapshot[] = [];
 		let totalTokens = 0;
 		let durationMs = 0;
@@ -682,18 +685,30 @@ function parsePersistedJournal(filePath: string, runId: string): PersistedRun | 
 				const nodeFailed = rec.status === "failed";
 				agents.push({
 					id: rec.step ?? agents.length + 1,
+					nodeId: rec.nodeId,
+					step: rec.step,
+					round: rec.round,
+					sessionId: rec.sessionId,
+					result: rec.result,
 					label,
 					prompt: `${rec.nodeType ?? "agent"} node "${rec.nodeId}"`,
 					status: nodeFailed ? "error" : "done",
 					resultPreview: preview(rec.result),
 					error: nodeFailed ? rec.error : undefined,
-					outputTokens: rec.tokens || 0,
+					outputTokens: rec.usage?.output ?? rec.tokens ?? 0,
+					inputTokens: rec.usage?.input,
+					usage: rec.usage,
+					toolUses: rec.toolCalls,
 					durationMs: rec.durationMs || 0,
 				});
 				totalTokens += rec.tokens || 0;
 				if (nodeFailed) status = "error";
+			} else if (rec.type === "result_correction") {
+				const node = agents.find(agent => agent.step === rec.step);
+				if (node && node.status !== "error") { node.result = rec.result; node.resultPreview = preview(rec.result); }
 			} else if (rec.type === "graph_result") {
-				if (rec.status === "aborted") status = "stopped";
+				if (rec.status === "paused") status = "paused";
+				else if (rec.status === "aborted") status = "stopped";
 				else if (rec.status === "max_iterations" || rec.error) status = "error";
 				else if (rec.status === "completed") status = "completed";
 				totalTokens = rec.totalTokens ?? totalTokens;

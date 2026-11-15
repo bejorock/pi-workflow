@@ -21,7 +21,7 @@ export interface WorkflowModeState {
 const PLAN_MODE_DISABLED_TOOLS = new Set<string>([
 	"write", "edit",
 	"subagent", "subagent_wait",
-	"workflow", "workflow_wait", "workflow_status", "workflow_stop", "workflow_reply",
+	"workflow", "workflow_wait", "workflow_status", "workflow_stop", "workflow_reply", "workflow_correct_result",
 	"ask_supervisor",
 	"list_agents", "list_workflows",
 ]);
@@ -159,13 +159,13 @@ export function registerWorkflowMode(
 		const kept = activeToolNames.filter((name) => !disabled.has(name));
 		// Make sure core workflow tools are available if the mode is workflow
 		if (mode === "workflow") {
-			return [...new Set([...kept, "workflow", "workflow_wait", "workflow_reply", "workflow_status", "workflow_stop", "list_agents", "list_workflows"])];
+			return [...new Set([...kept, "workflow", "workflow_wait", "workflow_reply", "workflow_status", "workflow_stop", "workflow_validate", "workflow_correct_result", "list_agents", "list_workflows"])];
 		}
 		if (mode === "plan") {
 			// Plan mode: read-only investigation only, no subagent/workflow tools at all
 			return kept;
 		}
-		return [...new Set([...kept, "write", "edit", "subagent", "workflow", "workflow_wait", "workflow_reply", "workflow_status", "workflow_stop"])];
+		return [...new Set([...kept, "write", "edit", "subagent", "workflow", "workflow_wait", "workflow_reply", "workflow_status", "workflow_stop", "workflow_validate", "workflow_correct_result"])];
 	}
 
 	function setMode(mode: SessionMode, ctx?: ExtensionContext): void {
@@ -253,7 +253,7 @@ export function registerWorkflowMode(
 	const disabledInPlan = new Set<string>([
 		"write", "edit",
 		"subagent", "subagent_wait",
-		"workflow", "workflow_wait", "workflow_status", "workflow_stop", "workflow_reply",
+		"workflow", "workflow_wait", "workflow_status", "workflow_stop", "workflow_reply", "workflow_correct_result",
 		"ask_supervisor",
 		"list_agents", "list_workflows",
 	]);

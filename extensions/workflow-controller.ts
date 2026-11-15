@@ -12,6 +12,8 @@ interface ControlledRun {
 export interface ControllerReply {
 	text: string; status: "completed" | "supervisor" | "stopped" | "already_delivered";
 	requestIds?: string[];
+	runId?: string;
+	runStatus?: DeliverableRun["status"];
 }
 export class WorkflowController {
 	private runs = new Map<string, ControlledRun>();
@@ -68,12 +70,12 @@ export class WorkflowController {
 				if (interrupted) {
 					await run.done;
 					run.delivered = true;
-					return { status: "stopped", text: run.report?.text ?? `Workflow ${run.runId} stopped by interruption.` };
+					return { status: "stopped", runId: run.runId, runStatus: run.report?.status ?? "aborted", text: run.report?.text ?? `Workflow ${run.runId} stopped by interruption.` };
 				}
 				if (run.completed) {
 					if (run.delivered) return { status: "already_delivered", text: `Workflow ${run.runId} has finished; its report was already delivered. Use workflow_status for inspection.` };
 					run.delivered = true;
-					return { status: "completed", text: run.report!.text };
+					return { status: "completed", runId: run.runId, runStatus: run.report!.status, text: run.report!.text };
 				}
 				const pending = this.broker?.listPendingForRun(run.runId).filter(r => r.kind === "supervisor" && r.expectsReply) ?? [];
 				if (pending.length) {
@@ -100,7 +102,7 @@ export function createWorkflowWaitTool(controller: WorkflowController) {
 		parameters: Type.Object({ runId: Type.Optional(Type.String({ description: "Workflow identity; defaults to the active workflow." })) }),
 		async execute(_id, params, signal) {
 			const result = await controller.wait(params.runId, signal);
-			return { content: [{ type: "text" as const, text: result.text }], details: { ...result, runId: params.runId ?? controller.activeRunId() } };
+			return { content: [{ type: "text" as const, text: result.text }], details: { ...result, controllerStatus: result.status, status: result.runStatus ?? result.status, runId: result.runId ?? params.runId ?? controller.activeRunId() } };
 		},
 	});
 }

@@ -36,10 +36,12 @@ export interface NodeExecution {
 	startedAt: number;
 	durationMs: number;
 	tokens?: number;
+	usage?: {input: number; output: number; cacheRead: number; cacheWrite: number; cost?: number};
+	toolCalls?: number;
 	error?: string;
 }
 
-export type GraphRunStatus = "completed" | "aborted" | "max_iterations";
+export type GraphRunStatus = "completed" | "aborted" | "max_iterations" | "paused";
 
 export interface GraphRunResult {
 	status: GraphRunStatus;
@@ -62,6 +64,8 @@ export interface GraphRunResult {
 export interface NodeRunOutcome {
 	result: unknown;
 	tokens?: number;
+	usage?: NodeExecution["usage"];
+	toolCalls?: number;
 	/**
 	 * Marks a failure the graph cannot route around (spawn failure, bad
 	 * config). Agent-level failures are NOT technical: an agent reporting it

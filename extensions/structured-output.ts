@@ -128,6 +128,11 @@ export function assertJsonSchemaObject(schema: unknown, label = "outputSchema"):
 	}
 }
 
+export async function assertStructuredOutputSchema(schema: JsonSchemaObject): Promise<void> {
+	const compile = await loadCompile();
+	compile(schema);
+}
+
 export async function validateStructuredOutputValue(schema: JsonSchemaObject, value: unknown): Promise<{ status: "valid" } | { status: "invalid"; message: string }> {
 	const compile = await loadCompile();
 	let validator: CompiledJsonSchema;

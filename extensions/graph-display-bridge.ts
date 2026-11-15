@@ -143,6 +143,13 @@ export class GraphDisplayBridge {
 		}
 	}
 
+	nodeProgress(nodeId: string, progress: import("./types.ts").AgentProgress): void {
+		try {
+			const node = this.manager.getRun(this.runId)?.snapshot.agents.findLast(agent => agent.nodeId === nodeId && agent.status === "running");
+			if (node) this.manager.updateAgentField(this.runId, node.id, "diagnostics", progress.diagnostics);
+		} catch { /* display observers cannot fail execution */ }
+	}
+
 	nodeStarted(info: {
 		step: number;
 		nodeId: string;
@@ -170,6 +177,9 @@ export class GraphDisplayBridge {
 		try {
 			this.manager.markAgentStart(this.runId, 0, {
 				id,
+				nodeId: info.nodeId,
+				step: info.step,
+				round: info.round,
 				label,
 				prompt: `${info.nodeType} node "${info.nodeId}"`,
 				status: "running",
@@ -230,6 +240,9 @@ export class GraphDisplayBridge {
 				execution.tokens,
 				execution.durationMs,
 			);
+			this.manager.updateAgentField(this.runId, id, "result", execution.result);
+			this.manager.updateAgentField(this.runId, id, "usage", execution.usage);
+			this.manager.updateAgentField(this.runId, id, "toolUses", execution.toolCalls);
 			// Watch the agent's persisted pi session so the /workflows navigator
 			// can surface its conversation on demand. Available only for agent
 			// nodes (they own a session file); human nodes have none.
@@ -252,6 +265,8 @@ export class GraphDisplayBridge {
 			this.manager.log(this.runId, `Path: ${result.path.join(" → ")}`);
 			if (result.status === "aborted" || this.manager.getRun(this.runId)?.status === "stopped") {
 				this.manager.stopRun(this.runId);
+			} else if (result.status === "paused") {
+				this.manager.pauseRun(this.runId);
 			} else this.manager.completeRun(this.runId, result.finalResult, result.error);
 		} catch {
 			// Ignore display failures.

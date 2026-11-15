@@ -208,7 +208,16 @@ export async function runSubagentForWorkflow(
 	return getResultOutput(result);
 }
 
+import { inspectResults } from "./result-inspection.ts";
+import { registerResultCorrectionTool } from "./result-correction.ts";
+import { registerWorkflowValidationTool } from "./workflow-validation.ts";
+
 const WorkflowStatusParams = Type.Object({
+	nodeId: Type.Optional(Type.String({description: "Stable node identity; returns all visits unless step is supplied."})),
+	step: Type.Optional(Type.Number({description: "Execution step/visit to inspect."})),
+	fields: Type.Optional(Type.Array(Type.String({description: "Selected fields such as result.data, error, or applicationVerdict."}))),
+	offset: Type.Optional(Type.Number({minimum: 0})),
+	limit: Type.Optional(Type.Number({minimum: 1, maximum: 100})),
 	runId: Type.String({ description: "The workflow run ID to inspect (e.g. as reported in a workflow's failure message or from /workflows)." }),
 	agentId: Type.Optional(
 		Type.Number({ description: "If provided, return full detail (prompt, result, error, tool-call/output history) for just this one agent. Otherwise returns a summary of all agents in the run." }),
@@ -261,6 +270,10 @@ export function registerWorkflowStatusTool(pi: ExtensionAPI, workflowManager: Wo
 						details: { found: false },
 					};
 				}
+				if (params.agentId !== undefined || params.nodeId !== undefined || params.step !== undefined || params.fields || params.offset !== undefined || params.limit !== undefined || params.historyLimit !== undefined) {
+					const selection = inspectResults(persisted.agents, params);
+					return {content: [{type: "text", text: JSON.stringify(selection, null, 2)}], details: {...selection, persisted: true, journalPath: `${workflowManager.getJournalDir()}/${params.runId}.jsonl`}};
+				}
 				const lines = [
 					`Workflow "${persisted.workflowName}" (${params.runId}) \u2014 status: ${persisted.status}`,
 					`Total tokens: ${persisted.totalTokens}, duration: ${persisted.durationMs}ms`,
@@ -268,45 +281,16 @@ export function registerWorkflowStatusTool(pi: ExtensionAPI, workflowManager: Wo
 					"Agents:",
 					...persisted.agents.map((a) => `  #${a.id} [${a.status}] ${a.label}${a.error ? ` \u2014 ERROR: ${a.error}` : ""}`),
 				];
-				return { content: [{ type: "text", text: lines.join("\n") }], details: { found: true, persisted: true, run: persisted } };
+				return { content: [{ type: "text", text: lines.join("\n") }], details: { found: true, persisted: true, run: {...persisted, agents: persisted.agents.map(({result, prompt, history, ...agent}) => agent)} } };
 			}
 
 			const snapshot = run.snapshot;
 
-			if (params.agentId !== undefined) {
-				const agent = snapshot.agents.find((a) => a.id === params.agentId);
-				if (!agent) {
-					return {
-						content: [{ type: "text", text: `No agent with id ${params.agentId} found in run "${params.runId}". Known agent IDs: ${snapshot.agents.map((a) => a.id).join(", ") || "(none)"}` }],
-						details: { found: false },
-					};
-				}
-				const limit = params.historyLimit ?? 100;
-				const history = (agent.history ?? []).slice(0, limit);
-				const truncatedNote = (agent.history?.length ?? 0) > limit ? `\n\n... (${(agent.history?.length ?? 0) - limit} more history entries not shown; increase historyLimit to see more)` : "";
-				const resultText = agent.result !== undefined && agent.result !== null
-					? (typeof agent.result === "string" ? agent.result : JSON.stringify(agent.result, null, 2))
-					: (agent.resultPreview || "(no result yet)");
-				const lines = [
-					`Agent #${agent.id} "${agent.label}" (phase: ${agent.phase ?? "(none)"}) \u2014 status: ${agent.status}`,
-					agent.model ? `Model: ${agent.model}` : undefined,
-					agent.sessionId ? `Session file: ${agent.sessionId}` : undefined,
-					agent.error ? `Error: ${agent.error}` : undefined,
-					"",
-					"Prompt:",
-					agent.prompt || "(none)",
-					"",
-					"Result:",
-					resultText,
-					"",
-					`History (${history.length}${(agent.history?.length ?? 0) > history.length ? ` of ${agent.history?.length}` : ""} entries):`,
-					...history.map((e) => "  " + summarizeHistoryEntry(e)),
-				].filter((l): l is string => l !== undefined);
-				return {
-					content: [{ type: "text", text: lines.join("\n") + truncatedNote }],
-					details: { found: true, agent },
-				};
+			if (params.agentId !== undefined || params.nodeId !== undefined || params.step !== undefined || params.fields || params.offset !== undefined || params.limit !== undefined || params.historyLimit !== undefined) {
+				const selection = inspectResults(snapshot.agents, params);
+				return {content: [{type: "text", text: JSON.stringify(selection, null, 2)}], details: selection};
 			}
+
 
 			const lines = [
 				`Workflow "${snapshot.meta.name}" (${params.runId}) \u2014 status: ${snapshot.status}`,
@@ -325,7 +309,7 @@ export function registerWorkflowStatusTool(pi: ExtensionAPI, workflowManager: Wo
 
 			return {
 				content: [{ type: "text", text: lines.join("\n") }],
-				details: { found: true, run: snapshot },
+				details: { found: true, run: {...snapshot, agents: snapshot.agents.map(({result, prompt, history, ...agent}) => agent)} },
 			};
 		},
 	});
@@ -981,6 +965,8 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool(createWorkflowWaitTool(workflowController));
 	pi.registerTool(workflowTool);
 	registerWorkflowStatusTool(pi, globalWorkflowManager);
+	registerWorkflowValidationTool(pi);
+	registerResultCorrectionTool(pi, globalWorkflowManager);
 	registerWorkflowStopTool(pi, globalWorkflowManager);
 
 	// Preserve legacy subagent delivery. Controlled graphs exclusively return

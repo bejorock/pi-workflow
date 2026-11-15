@@ -32,8 +32,14 @@ export type AgentStatus = "queued" | "running" | "done" | "error" | "skipped" | 
  * Per-agent snapshot for display.
  */
 export interface WorkflowAgentSnapshot {
+	diagnostics?: import("./types.ts").ExecutionDiagnostics;
+	usage?: import("./graph-execution-types.ts").NodeExecution["usage"];
 	/** Sequential agent ID */
 	id: number;
+	/** Stable graph node identity; id remains the execution/visit step. */
+	nodeId?: string;
+	step?: number;
+	round?: number;
 	/** Display label for this agent */
 	label: string;
 	/** Phase this agent belongs to */
@@ -97,7 +103,7 @@ export interface WorkflowSnapshot {
 	/** Workflow metadata */
 	meta: WorkflowMeta;
 	/** Overall run status */
-	status: "running" | "completed" | "error" | "cancelled";
+	status: "running" | "paused" | "completed" | "error" | "cancelled";
 	/** Phases in the workflow */
 	phases: WorkflowPhaseSnapshot[];
 	/** All agents (flat list) */

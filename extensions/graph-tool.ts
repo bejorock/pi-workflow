@@ -7,6 +7,10 @@
  * stops the underlying run; reports/questions have a single delivery owner.
  */
 
+import { assertStructuredOutputSchema } from "./structured-output.ts";
+import { checkNodeContract } from "./node-contracts.ts";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { WorkflowController } from "./workflow-controller.ts";
 import { WorkflowManager as ControllerManager } from "./workflow-manager.ts";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -28,7 +32,7 @@ import { buildGraphFromScript, GraphValidationError } from "./graph-validator.ts
 import { GraphDisplayBridge } from "./graph-display-bridge.ts";
 import type { GraphRunContext } from "./graph-run-context.ts";
 import { executeGraphRun, type GraphRunReport } from "./graph-run.ts";
-import { loadSavedWorkflowScript } from "./workflow-library.ts";
+import { loadSavedWorkflowScript, resolveSavedWorkflowPath } from "./workflow-library.ts";
 import type { WorkflowManager } from "./workflow-manager.ts";
 import type { RequestBroker } from "./request-broker.ts";
 import type { ForkContextOptions } from "./types.ts";
@@ -88,6 +92,12 @@ function makeContractSandbox(cwd: string) {
 }
 
 const GraphToolParams = Type.Object({
+	budgetPolicy: Type.Optional(Type.Object({
+		onLimit: Type.Literal("pause_before_next_node"),
+		perNodeTokens: Type.Optional(Type.Number({minimum: 1})),
+		maxToolCalls: Type.Optional(Type.Number({minimum: 1})),
+	})),
+	file: Type.Optional(Type.String({description: "Path to a .js or JavaScript-compatible .ts workflow. Actual TypeScript syntax is not transpiled. Exclusive with script/loadWorkflow."})),
 	script: Type.Optional(
 		Type.String({
 			description:
@@ -263,7 +273,14 @@ export function createGraphWorkflowTool(options: GraphToolOptions = {}): ToolDef
 			}
 
 			let script: string;
-			if (params.loadWorkflow) {
+			let sourcePath: string | undefined;
+			if ([params.script, params.loadWorkflow, params.file].filter(value => value !== undefined).length !== 1) throw new Error("Provide exactly one of script, file, or loadWorkflow.");
+			if (params.file) {
+				sourcePath = resolve(cwd, params.file);
+				if (!/[.](js|ts)$/.test(sourcePath)) throw new Error("Workflow file must use .js or .ts (JavaScript syntax only).");
+				script = readFileSync(sourcePath, "utf8");
+			} else if (params.loadWorkflow) {
+				sourcePath = resolveSavedWorkflowPath(cwd, params.loadWorkflow);
 				const saved = loadSavedWorkflowScript(cwd, params.loadWorkflow);
 				if (!saved) {
 					throw new Error(
@@ -304,6 +321,11 @@ export function createGraphWorkflowTool(options: GraphToolOptions = {}): ToolDef
 
 			const { meta, graph } = built;
 			const nodeIds = [...graph.nodes.keys()];
+			const catalog = discoverAgents(cwd, "both").agents;
+			for (const node of graph.nodes.values()) if (node.def.type === "agent") {
+				if (node.def.outputSchema) await assertStructuredOutputSchema(node.def.outputSchema);
+				checkNodeContract(cwd, node.def, catalog.find(agent => agent.name === (node.def.type === "agent" ? node.def.agentName : ""))?.tools);
+			}
 
 			// Check the roster before detaching. Once the run is in the background
 			// its failures are reported in a message rather than by failing this
@@ -368,6 +390,7 @@ export function createGraphWorkflowTool(options: GraphToolOptions = {}): ToolDef
 					completedRounds: resumeState.completedRounds,
 					completedNodeExecutions: resumeState.completedNodeExecutions,
 					executedNodeIds: resumeState.executedNodeIds,
+					history: resumeState.executions.map(record => ({...record, routedTo: record.routedTo ?? "", startedAt: record.startedAt ?? 0, durationMs: record.durationMs ?? 0})),
 				};
 			}
 
@@ -409,11 +432,15 @@ export function createGraphWorkflowTool(options: GraphToolOptions = {}): ToolDef
 						})
 					: undefined;
 
+				for (const execution of superstepResume?.history ?? []) {
+					display?.nodeStarted({step: execution.step, nodeId: execution.nodeId, nodeType: execution.nodeType, agentName: execution.agentName, round: execution.round});
+					display?.nodeCompleted(execution);
+				}
 				options.onRunStart?.({ runId, name: meta.name, nodeIds });
 			} catch (error) {
 				runAbort.abort();
 				const message = error instanceof Error ? error.message : String(error);
-				controller.complete({ runId, name: meta.name, text: `Workflow startup failed: ${message}` });
+				controller.complete({ runId, name: meta.name, status: "failed", text: `Workflow startup failed: ${message}` });
 				display?.runFailed(message);
 				throw error;
 			}
@@ -442,6 +469,7 @@ export function createGraphWorkflowTool(options: GraphToolOptions = {}): ToolDef
 					spawnAgent: spawnAgent as never,
 					broker: options.broker,
 					nodeStateBuffers: context.nodeStateBuffers,
+					onNodeProgress: (nodeId, progress) => display?.nodeProgress(nodeId, progress),
 				});
 
 			// Start the independently owned engine, then attach the mandatory waiter.
@@ -453,9 +481,11 @@ export function createGraphWorkflowTool(options: GraphToolOptions = {}): ToolDef
 				meta,
 				graph,
 				journalDir,
+				sourcePath,
 				signal: runAbort.signal,
 				maxIterations: params.maxIterations,
 				tokenBudget: params.tokenBudget,
+				budgetPolicy: params.budgetPolicy,
 				useWorktree: params.useWorktree,
 				saveWorkflow: params.saveWorkflow,
 				resume: superstepResume,
@@ -477,7 +507,7 @@ export function createGraphWorkflowTool(options: GraphToolOptions = {}): ToolDef
 					// A detached run has no tool call left to fail, so a crash has to
 					// be reported through the manager or it vanishes silently.
 					const message = error instanceof Error ? error.message : String(error);
-					controller.complete({ runId, name: meta.name, text: `Workflow ${meta.name} (${runId}) failed: ${message}` });
+					controller.complete({ runId, name: meta.name, status: "failed", text: `Workflow ${meta.name} (${runId}) failed: ${message}` });
 					display?.runFailed(message);
 					return undefined;
 				});
@@ -512,7 +542,7 @@ export function createGraphWorkflowTool(options: GraphToolOptions = {}): ToolDef
 								? "  note: args arrived as a JSON string, not an object, and was decoded. This should not normally happen — pass args as an object literal."
 								: undefined,
 							`  runId: ${runId}`,
-							`  nodes: ${nodeIds.join(" -> ")}`,
+							`  definedNodes: ${nodeIds.join(", ")}`,
 
 						]
 							.filter((line): line is string => line !== undefined)
@@ -523,9 +553,13 @@ export function createGraphWorkflowTool(options: GraphToolOptions = {}): ToolDef
 					runId,
 					name: meta.name,
 					background: false,
-					status: controlled.status,
+					status: controlled.runStatus ?? controlled.status,
+					controllerStatus: controlled.status,
+					runStatus: controlled.runStatus,
 					requestIds: controlled.requestIds,
 					nodeIds,
+					sourcePath,
+					sourceHash: graphScriptHash(script),
 					resumed: Boolean(params.resumeRunId),
 					argsWasDecodedFromString,
 				},

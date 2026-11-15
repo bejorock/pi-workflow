@@ -314,6 +314,15 @@ export default function registerSubagentPromptRuntime(pi: ExtensionAPI): void {
 
 	onRuntimeEvent("before_agent_start", async (raw: unknown) => {
 		const event = raw as { systemPrompt: string };
+		const required = JSON.parse(process.env.PI_WORKFLOW_NODE_REQUIRED_TOOLS ?? "[]") as string[];
+		const missing = required.filter(tool => !pi.getActiveTools().includes(tool));
+		if (missing.length) {
+			const message = `Node required tools unavailable before provider request: ${missing.join(", ")}`;
+			// Pi catches extension-hook exceptions and continues generation. A child
+			// must terminate here, rather than merely log a failed preflight.
+			if (process.env.PI_SUBAGENT_CHILD === "1") { process.stderr.write(`${message}\n`); process.exit(1); }
+			throw new Error(message);
+		}
 		const intercomSessionName = process.env[SUBAGENT_INTERCOM_SESSION_NAME_ENV]?.trim();
 		if (intercomSessionName && typeof (pi as { setSessionName?: (name: string) => void }).setSessionName === "function") {
 			(pi as { setSessionName: (name: string) => void }).setSessionName(intercomSessionName);

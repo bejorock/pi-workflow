@@ -79,7 +79,16 @@ export interface HumanNodeOptions {
 	artifacts?: ArtifactKind[];
 }
 
-export interface AgentNodeDef {
+export interface AgentNodeOptions {
+	outputSchema?: Record<string, unknown>;
+	requiredTools?: string[];
+	/** State field paths projected into the prompt; full reports remain in artifacts. */
+	handoff?: string[];
+	maxHandoffChars?: number;
+	/** Files whose exact contents must match between briefing and execution/resume. */
+	dependencies?: Record<string, string>;
+}
+export interface AgentNodeDef extends AgentNodeOptions {
 	type: "agent";
 	agentName: string;
 	promptFn: PromptFn;
@@ -154,6 +163,8 @@ export type NodeDef = AgentNodeDef | HumanNodeDef | FnNodeDef | CommandNodeDef;
 export interface GraphNode {
 	id: string;
 	def: NodeDef;
+	/** Default all-predecessor barrier; selected ignores branches unreachable in this wave. */
+	join?: "all" | "selected";
 }
 
 export type Edge =
@@ -222,7 +233,7 @@ function describeTarget(target: string | EndSymbol): string {
 
 // --- Node constructors, exposed as sandbox globals ---
 
-export function agent(agentName: string, promptFn: PromptFn): AgentNodeDef {
+export function agent(agentName: string, promptFn: PromptFn, options: AgentNodeOptions = {}): AgentNodeDef {
 	if (typeof agentName !== "string" || agentName.trim().length === 0) {
 		throw new GraphDefinitionError("agent() requires an agent name");
 	}
@@ -231,7 +242,11 @@ export function agent(agentName: string, promptFn: PromptFn): AgentNodeDef {
 			`agent("${agentName}") requires a prompt function: agent("${agentName}", (state) => "...")`,
 		);
 	}
-	return { type: "agent", agentName: agentName.trim(), promptFn };
+	if (options.outputSchema !== undefined && (!options.outputSchema || typeof options.outputSchema !== "object" || Array.isArray(options.outputSchema))) throw new GraphDefinitionError("outputSchema must be a JSON Schema object.");
+	for (const key of ["requiredTools", "handoff"] as const) if (options[key] !== undefined && (!Array.isArray(options[key]) || options[key]!.some(value => typeof value !== "string" || !value.trim()))) throw new GraphDefinitionError(`${key} must be an array of non-empty strings.`);
+	if (options.dependencies !== undefined && (!options.dependencies || typeof options.dependencies !== "object" || Array.isArray(options.dependencies) || Object.values(options.dependencies).some(value => typeof value !== "string"))) throw new GraphDefinitionError("dependencies must map file paths to SHA-256 strings.");
+	if (options.maxHandoffChars !== undefined && (!Number.isFinite(options.maxHandoffChars) || options.maxHandoffChars < 128)) throw new GraphDefinitionError("maxHandoffChars must be at least 128.");
+	return { ...options, type: "agent", agentName: agentName.trim(), promptFn };
 }
 
 export function human(prompt: string | PromptFn, options: HumanNodeOptions = {}): HumanNodeDef {
@@ -362,6 +377,14 @@ export class GraphBuilder {
 		// First node declared is the entry unless start() says otherwise.
 		// Saves a redundant start() call in the common linear case.
 		if (this.entry === null) this.entry = id;
+		return this;
+	}
+
+	join(id: string, mode: "all" | "selected"): this {
+		const node = this.nodes.get(id);
+		if (!node) throw new GraphDefinitionError(`Define node "${id}" before configuring its join.`);
+		if (mode !== "all" && mode !== "selected") throw new GraphDefinitionError("Join must be all or selected.");
+		node.join = mode;
 		return this;
 	}
 

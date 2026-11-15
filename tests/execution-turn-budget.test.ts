@@ -132,6 +132,26 @@ describe("turn-budget parent-side backstop (execution.ts)", () => {
 		expect(result.exitCode).toBe(0);
 	});
 
+	it("accumulates every turn's tokens and normalizes provider cost objects", async () => {
+		const binary = path.join(tempDir, "usage.cjs");
+		const events = [1, 2].map(i => ({type: "turn_end", message: {role: "assistant", content: [], usage: {input: i * 10, output: i, cacheRead: i * 100, cacheWrite: i * 2, cost: {total: i * 0.1}}}}));
+		events.push({type: "agent_end", messages: []} as never);
+		fs.writeFileSync(binary, `#!${process.execPath}\nfor(const e of ${JSON.stringify(events)}) console.log(JSON.stringify(e));`, {mode: 0o755});
+		process.env[PI_SUBAGENT_PI_BINARY_ENV] = binary;
+		const result = await runSingleAgent(tempDir, makeAgent(), "usage", {runId: "usage"});
+		expect(result.usage).toMatchObject({input: 30, output: 3, cacheRead: 300, cacheWrite: 6, totalTokens: 339, turns: 2, costKnown: true});
+		expect(result.usage.cost).toBeCloseTo(0.3);
+	});
+
+	it("preserves required-tool preflight stderr as a technical failure with diagnostics", async () => {
+		const binary = path.join(tempDir, "preflight.cjs");
+		fs.writeFileSync(binary, `#!${process.execPath}\nconsole.error('Node required tools unavailable before provider request: missing');process.exit(1);`, {mode: 0o755});
+		process.env[PI_SUBAGENT_PI_BINARY_ENV] = binary;
+		const result = await runSingleAgent(tempDir, makeAgent(), "preflight", {runId: "preflight"});
+		expect(classifySingleResultFailure(result)).toMatchObject({class: "technical", code: "required-tools-unavailable"});
+		expect(result.diagnostics).toMatchObject({phase: "provider", failureKind: "process", changeEvidence: "unknown"});
+	});
+
 	it("applies DEFAULT_TURN_BUDGET (maxTurns: 50) when neither the call site nor agent frontmatter set one", async () => {
 		const scriptPath = writeHealthyPiBinary(tempDir, 3); // well under the default of 50
 		process.env[PI_SUBAGENT_PI_BINARY_ENV] = scriptPath;

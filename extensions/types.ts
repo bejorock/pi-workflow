@@ -97,6 +97,9 @@ export interface Usage {
 	cacheRead: number;
 	cacheWrite: number;
 	cost: number;
+	/** Undefined until measured; false means zero was only an unpriced placeholder. */
+	costKnown?: boolean;
+	totalTokens?: number;
 	turns: number;
 }
 
@@ -142,7 +145,20 @@ export interface TurnBudgetState extends ResolvedTurnBudget {
 	exceededAtTurn?: number;
 }
 
+export interface ExecutionDiagnostics {
+	phase: "provider" | "generation" | "tool" | "human_wait" | "supervisor_wait" | "settled";
+	lastEventAt?: number;
+	lastProviderResponseAt?: number;
+	providerRequestId?: string;
+	streamBytes: number;
+	argumentBytes: number;
+	failureKind?: "timeout" | "cancelled" | "protocol" | "provider" | "process";
+	changedFiles?: Array<{path: string; sha256?: string}>;
+	changeEvidence: "unknown" | "observed";
+	resumeAdvice?: string;
+}
 export interface AgentProgress {
+	diagnostics?: ExecutionDiagnostics;
 	index: number;
 	agent: string;
 	status: "pending" | "running" | "completed" | "failed" | "detached";
@@ -376,6 +392,7 @@ export interface SingleResult {
 	outputSaveError?: string;
 	structuredOutput?: unknown;
 	structuredOutputFailed?: boolean;
+	diagnostics?: ExecutionDiagnostics;
 	structuredOutputPath?: string;
 	structuredOutputSchemaPath?: string;
 	acceptance?: AcceptanceLedger;

@@ -14,6 +14,7 @@
  * stable node ids, so "what already ran" needs no heuristic.
  */
 
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { NodeExecution } from "./graph-executor.ts";
@@ -37,6 +38,8 @@ export interface GraphJournalRunRecord {
 	runId: string;
 	/** Invalidates a resume when the script changed. */
 	scriptHash: string;
+	sourcePath?: string;
+	sourceHashAlgorithm?: "sha256";
 	name: string;
 	description?: string;
 	entry: string;
@@ -63,6 +66,8 @@ export interface GraphJournalNodeRecord {
 	result: unknown;
 	routedTo: string;
 	tokens?: number;
+	usage?: NodeExecution["usage"];
+	toolCalls?: number;
 	error?: string;
 	startedAt: number;
 	durationMs: number;
@@ -105,7 +110,7 @@ export interface GraphJournalRoundRecord {
 
 export interface GraphJournalResultRecord {
 	type: "graph_result";
-	status: "completed" | "aborted" | "max_iterations";
+	status: "completed" | "aborted" | "max_iterations" | "paused";
 	/** Rounds for a superstep run; node executions for a linear one. */
 	iterations: number;
 	/** Total node executions. Present for superstep runs. */
@@ -156,7 +161,8 @@ export type GraphJournalRecord =
 	| GraphJournalResultRecord
 	| GraphJournalBrokerRequestRecord
 	| GraphJournalBrokerAnswerRecord
-	| GraphJournalStateActionRecord;
+	| GraphJournalStateActionRecord
+	| {type: "result_correction"; step: number; nodeId: string; result: unknown; timestamp: number};
 
 export interface GraphResumeState {
 	/** Node executions already recorded, in order. */
@@ -173,7 +179,7 @@ export interface GraphResumeState {
 }
 
 export function graphScriptHash(script: string): string {
-	return hashString(script);
+	return createHash("sha256").update(script, "utf8").digest("hex");
 }
 
 function journalPath(journalDir: string, runId: string): string {
@@ -205,11 +211,13 @@ export class GraphJournal {
 		journalDir: string;
 		runId: string;
 		scriptHash: string;
+		sourcePath?: string;
 		name: string;
 		description?: string;
 		entry: string;
 		nodeIds: string[];
 		initialState: GraphState;
+		resume?: boolean;
 	}): GraphJournal {
 		const filePath = journalPath(options.journalDir, options.runId);
 		const journal = new GraphJournal(filePath, options.runId);
@@ -223,10 +231,16 @@ export class GraphJournal {
 			return journal;
 		}
 
+		if (options.resume && fs.existsSync(filePath)) {
+			for (const record of readGraphJournal(filePath)) if (record.type === "node") { journal.totalTokens += record.tokens ?? 0; journal.nodeCount++; }
+			return journal;
+		}
 		journal.append({
 			type: "graph_run",
 			runId: options.runId,
 			scriptHash: options.scriptHash,
+			sourcePath: options.sourcePath,
+			sourceHashAlgorithm: options.scriptHash.length === 64 ? "sha256" : undefined,
 			name: options.name,
 			description: options.description,
 			entry: options.entry,
@@ -261,6 +275,8 @@ export class GraphJournal {
 			result: execution.result,
 			routedTo: execution.routedTo,
 			tokens: execution.tokens,
+			usage: execution.usage,
+			toolCalls: execution.toolCalls,
 			sessionId: execution.sessionId,
 			error: execution.error,
 			startedAt: execution.startedAt,
@@ -287,7 +303,7 @@ export class GraphJournal {
 	}
 
 	recordResult(result: {
-		status: "completed" | "aborted" | "max_iterations";
+		status: "completed" | "aborted" | "max_iterations" | "paused";
 		iterations: number;
 		nodeExecutions?: number;
 		durationMs: number;
@@ -394,6 +410,10 @@ export function readGraphJournal(filePath: string): GraphJournalRecord[] {
 		}
 	}
 
+	for (const correction of records) if (correction.type === "result_correction") {
+		const node = records.find((record): record is GraphJournalNodeRecord => record.type === "node" && record.step === correction.step);
+		if (node && node.status !== "failed") node.result = correction.result;
+	}
 	return records;
 }
 
@@ -579,10 +599,11 @@ export function loadGraphSuperstepResumeState(options: {
 
 	const finished = records.find((r): r is GraphJournalResultRecord => r.type === "graph_result");
 
+	const latestFinished = records.filter((r): r is GraphJournalResultRecord => r.type === "graph_result").at(-1);
 	// A completed run has nothing to resume. Otherwise continue from the last
 	// barrier's frontier, or from the entry when no round ever completed.
 	let frontier: string[];
-	if (finished?.status === "completed") {
+	if (latestFinished?.status === "completed") {
 		frontier = [];
 	} else if (!lastRound) {
 		frontier = [meta.entry];

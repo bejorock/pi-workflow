@@ -66,6 +66,7 @@ export function saveWorkflowScript(cwd: string, script: string, meta: WorkflowMe
 	fs.mkdirSync(dir, { recursive: true });
 	const name = sanitizeWorkflowName(meta.name);
 	const filePath = getWorkflowFilePath(cwd, name);
+	if (fs.existsSync(path.join(dir, `${name}.ts`))) throw new Error(`Cannot save ${name}.js: ${name}.ts already exists. Rename or remove one to avoid ambiguity.`);
 
 	const header = [
 		"/**",
@@ -88,28 +89,17 @@ export function saveWorkflowScript(cwd: string, script: string, meta: WorkflowMe
  * project-local (.pi-workflow/workflows/), user-global (~/.pi/agent/workflows/),
  * and bundled/built-in workflows (bundled-workflows/).
  */
-export function loadSavedWorkflowScript(cwd: string, name: string): string | undefined {
-	const sanitizedName = `${sanitizeWorkflowName(name)}.js`;
-
-	// 1. Project-local
-	const projectPath = path.join(getWorkflowLibraryDir(cwd), sanitizedName);
-	if (fs.existsSync(projectPath)) {
-		try { return fs.readFileSync(projectPath, "utf-8"); } catch {}
+export function resolveSavedWorkflowPath(cwd: string, name: string): string | undefined {
+	for (const dir of [getWorkflowLibraryDir(cwd), getUserWorkflowsDir(), BUILTIN_WORKFLOWS_DIR]) {
+		const matches = [".js", ".ts"].map(ext => path.join(dir, `${sanitizeWorkflowName(name)}${ext}`)).filter(p => fs.existsSync(p));
+		if (matches.length > 1) throw new Error(`Ambiguous saved workflow "${name}": both .js and .ts exist in ${dir}. Rename or remove one.`);
+		if (matches.length) return matches[0];
 	}
-
-	// 2. User-global
-	const userPath = path.join(getUserWorkflowsDir(), sanitizedName);
-	if (fs.existsSync(userPath)) {
-		try { return fs.readFileSync(userPath, "utf-8"); } catch {}
-	}
-
-	// 3. Bundled/built-in
-	const builtinPath = path.join(BUILTIN_WORKFLOWS_DIR, sanitizedName);
-	if (fs.existsSync(builtinPath)) {
-		try { return fs.readFileSync(builtinPath, "utf-8"); } catch {}
-	}
-
 	return undefined;
+}
+export function loadSavedWorkflowScript(cwd: string, name: string): string | undefined {
+	const filePath = resolveSavedWorkflowPath(cwd, name);
+	return filePath ? fs.readFileSync(filePath, "utf8") : undefined;
 }
 
 /**
@@ -119,8 +109,11 @@ function scanWorkflowDir(dir: string, source: "builtin" | "user" | "project"): S
 	if (!fs.existsSync(dir)) return [];
 	const results: SavedWorkflowInfo[] = [];
 	try {
-		for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-			if (!entry.isFile() || !entry.name.endsWith(".js")) continue;
+		const entries = fs.readdirSync(dir, { withFileTypes: true });
+		for (const entry of entries) {
+			const stem = entry.name.replace(/[.](js|ts)$/, "");
+			if (entries.filter(e => e.isFile() && e.name.replace(/[.](js|ts)$/, "") === stem).length > 1) throw new Error(`Ambiguous saved workflow "${stem}" in ${dir}: both .js and .ts exist.`);
+			if (!entry.isFile() || !/[.](js|ts)$/.test(entry.name)) continue;
 			const filePath = path.join(dir, entry.name);
 			try {
 				const content = fs.readFileSync(filePath, "utf-8");
@@ -141,7 +134,9 @@ function scanWorkflowDir(dir: string, source: "builtin" | "user" | "project"): S
 				// Skip files that fail to parse (e.g. hand-edited, corrupted).
 			}
 		}
-	} catch {}
+	} catch (error) {
+		if (error instanceof Error && error.message.startsWith("Ambiguous")) throw error;
+	}
 	return results;
 }
 
@@ -169,25 +164,10 @@ export function listSavedWorkflows(cwd: string): SavedWorkflowInfo[] {
  * Built-in workflows are read-only and cannot be deleted.
  */
 export function deleteSavedWorkflow(cwd: string, name: string): boolean {
-	const sanitizedName = `${sanitizeWorkflowName(name)}.js`;
-
-	const projectPath = path.join(getWorkflowLibraryDir(cwd), sanitizedName);
-	if (fs.existsSync(projectPath)) {
-		try {
-			fs.unlinkSync(projectPath);
-			return true;
-		} catch {}
-	}
-
-	const userPath = path.join(getUserWorkflowsDir(), sanitizedName);
-	if (fs.existsSync(userPath)) {
-		try {
-			fs.unlinkSync(userPath);
-			return true;
-		} catch {}
-	}
-
-	return false;
+	const resolved = resolveSavedWorkflowPath(cwd, name);
+	if (!resolved || resolved.startsWith(BUILTIN_WORKFLOWS_DIR + path.sep)) return false;
+	fs.unlinkSync(resolved);
+	return true;
 }
 
 const ListWorkflowsParams = Type.Object({

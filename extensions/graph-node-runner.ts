@@ -12,6 +12,8 @@
  */
 
 import { boundedCallback } from "./bounded-callback.ts";
+import { checkNodeContract, prepareNodeInput } from "./node-contracts.ts";
+import { validateStructuredOutputValue, type StructuredOutputRuntime } from "./structured-output.ts";
 import { runCommandProcess } from "./command-process.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -20,7 +22,7 @@ import { discoverAgents } from "./agents.ts";
 import { PI_WORKFLOW_NODE_ID_ENV } from "./channel.ts";
 import { classifySingleResultFailure } from "./failure-classifier.ts";
 import type { NodeStateBuffers } from "./node-state-reducer.ts";
-import type { CommandNodeDef, GraphNode, GraphState } from "./graph-dsl.ts";
+import type { AgentNodeOptions, CommandNodeDef, GraphNode, GraphState } from "./graph-dsl.ts";
 import type { NodeRunOutcome, NodeRunner } from "./graph-executor.ts";
 import type { RequestBroker } from "./request-broker.ts";
 import { plansDir } from "./plan-tool.ts";
@@ -284,6 +286,7 @@ export interface AgentSpawnOptions {
 	parentSessionId?: string;
 	forkContext?: ForkContextOptions;
 	onEvent?: (event: Record<string, unknown>) => void;
+	onNodeProgress?: (nodeId: string, progress: import("./types.ts").AgentProgress) => void;
 	artifactsDir?: string;
 	/**
 	 * Required for artifacts to actually be written: runSingleAgent gates on
@@ -373,8 +376,10 @@ export function createNodeRunner(options: CreateNodeRunnerOptions): NodeRunner {
 			case "command":
 				return runCommandNode(node.id, node.def, state, options.cwd, signal);
 
-			case "agent":
-				return runAgentNode(node, node.def.agentName, boundedCallback(node.def.promptFn, state), signal);
+			case "agent": {
+				const input = prepareNodeInput(options.cwd, options.runId, node.id, context.step, boundedCallback(node.def.promptFn, state), state, node.def);
+				return runAgentNode(node, node.def.agentName, input.prompt, signal);
+			}
 
 			case "human": {
 				const def = node.def;
@@ -628,6 +633,9 @@ export function createNodeRunner(options: CreateNodeRunnerOptions): NodeRunner {
 			return { result: null, technicalFailure: true, error: resolved.error };
 		}
 
+		const contract: AgentNodeOptions = node.def.type === "agent" ? node.def : {};
+		try { checkNodeContract(options.cwd, contract, resolved.agent.tools); }
+		catch (error) { return {result: null, technicalFailure: true, error: String(error)}; }
 		spawnIndex += 1;
 
 		// `withEscalationProtocol` is applied unconditionally (deduped for bundled
@@ -641,6 +649,15 @@ export function createNodeRunner(options: CreateNodeRunnerOptions): NodeRunner {
 			`${node.id}.jsonl`,
 		);
 		let single: SingleResult;
+		let structuredOutput: StructuredOutputRuntime | undefined;
+		if (contract.outputSchema) {
+			const dir = path.join(options.cwd, ".pi-workflow", "artifacts", "contracts", options.runId);
+			fs.mkdirSync(dir, {recursive: true, mode: 0o700});
+			const stem = `${encodeURIComponent(node.id)}-${spawnIndex}`;
+			structuredOutput = {schema: contract.outputSchema, schemaPath: path.join(dir, `${stem}.schema.json`), outputPath: path.join(dir, `${stem}.result.json`)};
+			fs.writeFileSync(structuredOutput.schemaPath, JSON.stringify(contract.outputSchema), {mode: 0o600});
+			prompt += "\n\nFinish by calling structured_output({value: ...}) with the required outputSchema. Do not treat an incomplete envelope as success.";
+		}
 		try {
 			// First spawn of this node in this run? The fork summary
 			// (a compaction of the orchestrator's parent session) bootstraps the
@@ -659,6 +676,7 @@ export function createNodeRunner(options: CreateNodeRunnerOptions): NodeRunner {
 				forkContext,
 				sessionFile,
 				onEvent: options.onEvent,
+				onProgress: (progress: import("./types.ts").AgentProgress) => options.onNodeProgress?.(node.id, progress),
 				artifactsDir: options.artifactsDir,
 				artifactConfig: options.artifactConfig,
 				context: resolved.agent.defaultContext ?? "fork",
@@ -666,11 +684,12 @@ export function createNodeRunner(options: CreateNodeRunnerOptions): NodeRunner {
 				preferredModelProvider: options.preferredModelProvider,
 				turnBudget: resolved.agent.turnBudget,
 				toolBudget: resolved.agent.toolBudget,
+				structuredOutput,
 				timeoutMs: resolved.agent.timeoutMs,
 				// This node's own id, so the child-side node_state tool can scope its
 				// requests to this node's accumulator (and so it can tell it is
 				// actually running as a graph node, not a plain subagent call).
-				extraEnv: { ...options.extraEnv, [PI_WORKFLOW_NODE_ID_ENV]: node.id },
+				extraEnv: { ...options.extraEnv, [PI_WORKFLOW_NODE_ID_ENV]: node.id, PI_WORKFLOW_NODE_REQUIRED_TOOLS: JSON.stringify(contract.requiredTools ?? []) },
 				maxSubagentDepth: resolveChildMaxSubagentDepth(
 					resolveCurrentMaxSubagentDepth(),
 					resolved.agent.maxSubagentDepth,
@@ -685,8 +704,24 @@ export function createNodeRunner(options: CreateNodeRunnerOptions): NodeRunner {
 		}
 
 		const sessionId = sessionFile;
-		const text = getFinalOutput(single.messages ?? []) || single.error || "";
+		const fullText = getFinalOutput(single.messages ?? []) || single.error || "";
+		let text = single.finalOutput ?? fullText;
+		let outputArtifact: string | undefined;
+		if (contract.maxHandoffChars !== undefined && fullText.length > contract.maxHandoffChars) {
+			const dir = path.join(options.cwd, ".pi-workflow", "artifacts", "handoffs", options.runId);
+			fs.mkdirSync(dir, {recursive: true, mode: 0o700});
+			outputArtifact = path.join(dir, `${encodeURIComponent(node.id)}-${spawnIndex}-output.md`);
+			fs.writeFileSync(outputArtifact, fullText, {mode: 0o600});
+			const suffix = `\n[Full output: ${outputArtifact}]`;
+			if (suffix.length > contract.maxHandoffChars) throw new Error("maxHandoffChars cannot fit output artifact reference.");
+			text = fullText.slice(0, contract.maxHandoffChars - suffix.length) + suffix;
+		}
 		const tokens = usageTokens(single);
+		const rawUsage = single.usage as unknown as {input?: number; output?: number; cacheRead?: number; cacheWrite?: number; cost?: number | {total?: number; totalFromProvider?: boolean}} | undefined;
+		const cost = rawUsage?.cost;
+		const knownCost = typeof cost === "number" ? (single.usage?.costKnown === false ? undefined : cost > 0 || single.usage?.costKnown === true ? cost : undefined) : cost && (cost.totalFromProvider || (cost.total ?? 0) > 0) ? cost.total : undefined;
+		const usage = rawUsage ? {input: rawUsage.input ?? 0, output: rawUsage.output ?? 0, cacheRead: rawUsage.cacheRead ?? 0, cacheWrite: rawUsage.cacheWrite ?? 0, cost: knownCost} : undefined;
+		const accounting = {usage, toolCalls: (single.messages ?? []).reduce((count, message) => count + (message.role === "assistant" ? message.content.filter(part => part.type === "toolCall").length : 0), 0)};
 
 		// Only classify when something actually went wrong; a clean run is
 		// never a failure.
@@ -698,10 +733,12 @@ export function createNodeRunner(options: CreateNodeRunnerOptions): NodeRunner {
 				// Drain the buffer for cleanup even though the graph aborts.
 				options.nodeStateBuffers?.drain(node.id);
 				return {
-					result: { status: "failed", agent: agentName, text, error: classification.reason },
+					result: { status: "failed", agent: agentName, text, error: classification.reason, diagnostics: single.diagnostics, artifacts: single.artifactPaths, outputArtifact, sessionId },
 					technicalFailure: true,
 					error: classification.reason,
 					tokens,
+					...accounting,
+					sessionId,
 				};
 			}
 
@@ -710,16 +747,24 @@ export function createNodeRunner(options: CreateNodeRunnerOptions): NodeRunner {
 			const parsed = parseAgentResult(text, agentName);
 			parsed.data = options.nodeStateBuffers?.drain(node.id) ?? {};
 			return {
-				result: { ...parsed, error: classification.reason, usage: tokens ? { tokens } : undefined },
-				error: classification.reason,
+				result: { ...parsed, status: parsed.status === "ok" ? "blocked" : parsed.status, error: classification.reason, usage: tokens ? { tokens } : undefined, diagnostics: single.diagnostics, artifacts: single.artifactPaths, outputArtifact,
+					...(contract.outputSchema && single.structuredOutputFailed ? {contractError: classification.reason, completionSchema: contract.outputSchema} : {}) },
+				error: contract.outputSchema && single.structuredOutputFailed ? undefined : classification.reason,
 				tokens,
+				...accounting,
 				sessionId,
 			};
 		}
 
 		const parsed = parseAgentResult(text, agentName);
 		if (tokens) parsed.usage = { tokens };
+		Object.assign(parsed, {diagnostics: single.diagnostics, artifacts: single.artifactPaths, outputArtifact});
 		parsed.data = options.nodeStateBuffers?.drain(node.id) ?? {};
-		return { result: parsed, tokens, sessionId };
+		if (contract.outputSchema) {
+			const validation = await validateStructuredOutputValue(contract.outputSchema, single.structuredOutput);
+			if (validation.status !== "valid") return {result: {...parsed, status: "blocked", contractError: validation.message, completionSchema: contract.outputSchema}, tokens, ...accounting, sessionId};
+			parsed.data = single.structuredOutput && typeof single.structuredOutput === "object" ? single.structuredOutput as Record<string, unknown> : {value: single.structuredOutput};
+		}
+		return { result: parsed, tokens, ...accounting, sessionId };
 	}
 }

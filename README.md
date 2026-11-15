@@ -682,13 +682,77 @@ shell commands. Without question tools, an agent can still report a blocker in i
 
 | Parameter | Purpose |
 |---|---|
-| `script` | The graph script (or use `loadWorkflow`) |
+| `script` / `file` / `loadWorkflow` | Exactly one: inline source, a workspace-relative/absolute `.js` or `.ts` path, or saved name |
 | `args` | Values available as `args`; must be JSON-serialisable |
 | `maxIterations` | Node-execution cap. Default 45 |
-| `tokenBudget` | Soft budget — warns at 80% and 100%, never kills a run |
+| `tokenBudget` | Soft budget — warns at 80% and 100%; does not interrupt running work |
+| `budgetPolicy` | Opt-in `{ onLimit: "pause_before_next_node", perNodeTokens?, maxToolCalls? }` checkpoint policy |
 | `useWorktree` | Run agents in an isolated git worktree |
 | `resumeRunId` | Resume a run, skipping completed nodes |
 | `loadWorkflow` / `saveWorkflow` | Reuse a saved graph by name |
+
+### Reliability, contracts, and offline inspection
+
+- The footer lists **definedNodes**, not a claimed execution path. Reports/journals show actual visits.
+  `details.controllerStatus` describes delivery; `details.runStatus` / `details.status` describe the engine
+  (`completed`, `aborted`, `max_iterations`, `paused`). Engine completion is not application acceptance.
+- Multiple predecessors remain an AND barrier by default. For conditional reconvergence explicitly use
+  `g.join("report", "selected")`; it waits for every still-reachable selected parallel predecessor, but
+  releases skipped alternatives. Cycles and round snapshots retain the same policy. This does not make
+  every conditional graph valid: inspect warnings and simulate its routes.
+- `workflow_validate({script, scenarios?})` performs role, contract and structural checks plus at most
+  20 stub-result scenarios (30 rounds each). A scenario maps node IDs to results. Node bodies, commands,
+  agents and artifact mutators are not executed; route callbacks are bounded. This is not a proof of
+  arbitrary callback reachability. Stub fn results use the production `{status,text,data}` shape.
+- Saved discovery supports `.js` and `.ts` in project/user/bundled tiers; same-tier duplicate stems fail
+  explicitly. **`.ts` currently means JavaScript-compatible source, not TypeScript transpilation**.
+  Exact UTF-8 source is hashed with SHA-256 and file paths recorded. Changed source refuses resume;
+  older journals with the former short hash also refuse resume rather than guess equivalence.
+- Checkpoint policy pauses **before the next parallel wave**, after completed work is journaled. It
+  checks cumulative tokenBudget, per-node tokens, or total tool calls. A running wave can overshoot;
+  this is not a hard spend ceiling or mid-edit kill. Explicit `resumeRunId` with identical source and
+  a revised/omitted policy continues the saved frontier without replaying completed writes. A budget
+  checkpoint settles its executor and releases the foreground slot; UI pause of a live run is distinct.
+  Accounting separates input/output/cache tokens, tool calls, node time, current invocation wall time
+  and known cost. Unpriced zero placeholders are **unknown**, not free inference.
+
+Optional third-argument agent contracts:
+
+```js
+g.node("review", agent("reviewer", s => "Review the selected findings.", {
+  outputSchema: {
+    type: "object", properties: { verdict: { type: "string", enum: ["accept", "reject"] } },
+    required: ["verdict"], additionalProperties: false,
+  },
+  requiredTools: ["read"],
+  handoff: ["research.data.findings"],
+  maxHandoffChars: 4000,
+  dependencies: { "briefing.md": "<exact 64-character SHA-256>" },
+}));
+```
+
+`outputSchema` requires the child to finish with validated `structured_output`; its object becomes
+`result.data`. Empty/malformed/missing completion data is blocked, never silently accepted. Tool
+preflight does not grant tools excluded by an agent's explicit list. Dependency hashes are checked
+before dispatch and resume: stale briefings require reassessment. Handoff field selection is explicit;
+oversize prompt/output is bounded with a reference to its complete private artifact, not silently lost.
+A schema object itself can still be large; use a compact schema and artifacts for large payloads.
+
+`workflow_correct_result({runId, step, value})` validates completion metadata against the original
+schema for a settled schema-failed node and appends a correction record. It never reruns writes,
+changes technical failures, replays routing, or retroactively declares application acceptance.
+Inspection/resume sees corrected metadata; deciding whether/how to continue remains explicit.
+
+`workflow_status` accepts `nodeId`, execution `step`, `agentId`, `fields` (for example `result.data`,
+`usage`, `applicationVerdict`), `offset`, `limit` (max 100), and `historyLimit` (max 1000). The same
+bounded selection works live and after restarting Pi, including repeated visits. Results over
+100,000 characters are explicitly omitted with journal/session guidance; select narrower fields.
+Execution status, agent outcome and application verdict are separate fields, not conflated success.
+
+Child diagnostics retain current phase, last activity/provider response, streamed/argument bytes,
+optional provider request ID, failure kind, partial output, artifacts and session path. Unavailable
+provider IDs and changed-file evidence remain unknown. Streaming progress is throttled; it does not
+extend the generation watchdog indefinitely. No automatic provider fallback or write replay occurs.
 
 ### `subagent`
 

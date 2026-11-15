@@ -107,6 +107,8 @@ export interface SuperstepRunOptions {
 	}) => void;
 	/** Continue a previous run instead of starting from the entry node. */
 	resume?: SuperstepResumeInput;
+	/** Called between completed, journaled waves, never during an active edit. */
+	shouldPause?: (history: NodeExecution[]) => boolean;
 }
 
 export interface SuperstepResumeInput {
@@ -441,6 +443,7 @@ function computeNextFrontier(
 	staticClaims: PendingClaims,
 	forwardReachable: Map<string, Set<string>>,
 	entry: string,
+	graph: BuiltGraph,
 ): Set<string> {
 	// 1. Partition: an edge routed at a node that already ran is a back-edge
 	//    (cycle / escalation) and triggers a wave reset. Only a *selected*
@@ -529,6 +532,24 @@ function computeNextFrontier(
 		}
 		// Only an edge that actually routed here marks the node selected.
 		if (fired.selected) selected.add(fired.to);
+	}
+
+	// Opt-in joins release only claims whose source cannot execute in this wave.
+	// Traverse conservative static adjacency, stopping at already executed nodes;
+	// reachable parallel siblings retain their claims and therefore remain AND barriers.
+	const possible = new Set<string>();
+	const pending = [...selected].filter(id => !executed.has(id));
+	while (pending.length) {
+		const source = pending.pop()!;
+		if (possible.has(source) || executed.has(source)) continue;
+		possible.add(source);
+		for (const [target, claims] of staticClaims) if (claims.has(source)) pending.push(target);
+	}
+	for (const [target, claims] of remainingClaims) {
+		if (graph.nodes.get(target)?.join !== "selected") continue;
+		for (const source of claims.keys()) {
+			if (!possible.has(source) && !executed.has(source) && source !== RESUME_SNAPSHOT_SOURCE) claims.set(source, 0);
+		}
 	}
 
 	// 5. Ready = nothing can still route here, something did route here, and it
@@ -687,6 +708,12 @@ export async function runSuperstepGraph(
 			break;
 		}
 
+		if (options.shouldPause?.(history)) {
+			status = "paused";
+			error = "Budget checkpoint reached before the next wave. Resume with a revised budget/policy; completed work is not replayed.";
+			break;
+		}
+
 		// The cap counts rounds (barriers), not node executions. A stuck cycle
 		// climbs rounds regardless of how many nodes each round runs.
 		if (iterations >= maxIterations) {
@@ -803,6 +830,8 @@ export async function runSuperstepGraph(
 					startedAt: r.nodeStartedAt,
 					durationMs: Date.now() - r.nodeStartedAt,
 					tokens: outcome.tokens,
+					usage: outcome.usage,
+					toolCalls: outcome.toolCalls,
 					error: outcome.error,
 					sessionId: outcome.sessionId,
 				};
@@ -835,6 +864,8 @@ export async function runSuperstepGraph(
 					startedAt: r.nodeStartedAt,
 					durationMs: Date.now() - r.nodeStartedAt,
 					tokens: outcome.tokens,
+					usage: outcome.usage,
+					toolCalls: outcome.toolCalls,
 					error: resolved.error,
 				};
 				history.push(execution);
@@ -867,6 +898,8 @@ export async function runSuperstepGraph(
 				startedAt: r.nodeStartedAt,
 				durationMs: Date.now() - r.nodeStartedAt,
 				tokens: outcome.tokens,
+				usage: outcome.usage,
+				toolCalls: outcome.toolCalls,
 				error: outcome.error,
 				sessionId: outcome.sessionId,
 			};
@@ -884,6 +917,7 @@ export async function runSuperstepGraph(
 			staticClaims,
 			forwardReachable,
 			graph.entry,
+			graph,
 		);
 
 		// An empty frontier is successful only when every selected node either

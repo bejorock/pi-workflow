@@ -18,6 +18,8 @@ export interface DeliverableRun {
 	runId: string;
 	name: string;
 	text: string;
+	/** Engine outcome, independent of successful report delivery. */
+	status?: "completed" | "aborted" | "max_iterations" | "paused" | "failed";
 }
 
 /**

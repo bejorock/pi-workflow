@@ -30,6 +30,7 @@ export interface FailureClassification {
 		| "protocol-limit"
 		| "aborted"
 		| "no-model-available"
+		| "required-tools-unavailable"
 		| "agent-error"
 		| "timed-out"
 		| "turn-budget-exceeded";
@@ -145,6 +146,10 @@ export function classifySingleResultFailure(result: SingleResult, exitSignal?: s
 	}
 
 	const errorText = result.error || result.errorMessage || "";
+
+	if (/Node required tools unavailable before provider request:/.test(errorText)) {
+		return {class: "technical", reason: errorText, code: "required-tools-unavailable"};
+	}
 
 	if (/no model candidates available/i.test(errorText) || /no more models to try/i.test(errorText)) {
 		return { class: "technical", reason: errorText || "No model candidates were available to run this agent.", code: "no-model-available" };
