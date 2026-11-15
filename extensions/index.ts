@@ -53,6 +53,7 @@ import { openWorkflowNavigator } from "./workflow-ui.ts";
 import { registerTaskPanel } from "./task-panel.ts";
 import { WorkflowController, SupervisorReminders, createWorkflowWaitTool } from "./workflow-controller.ts";
 import { registerWorkflowMode } from "./workflow-mode.ts";
+import { readChildToolAllowlist } from "./tool-availability.ts";
 import { registerBlankStopGuard } from "./blank-stop-guard.ts";
 import { registerBashTimeoutGuard } from "./bash-timeout-guard.ts";
 import { planCreate, planGet, planList, planEdit, planDelete } from "./plan-tool.ts";
@@ -1488,7 +1489,11 @@ export default function (pi: ExtensionAPI) {
 		if (!active.includes("subagent_wait")) toActivate.push("subagent_wait");
 		if (!active.includes("plan")) toActivate.push("plan");
 		if (!active.includes("contract")) toActivate.push("contract");
-		if (toActivate.some((t) => !active.includes(t))) {
+		const childAllowlist = readChildToolAllowlist();
+		if (childAllowlist !== undefined) {
+			// Tool registration is not a grant: explicit child tools is authoritative.
+			pi.setActiveTools(childAllowlist);
+		} else if (toActivate.some((t) => !active.includes(t))) {
 			pi.setActiveTools([...new Set([...active, ...toActivate])]);
 		}
 		if (ctx?.cwd) {

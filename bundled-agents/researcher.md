@@ -1,7 +1,7 @@
 ---
 name: researcher
 description: Deep read-only investigation of a codebase question. Answers with evidence, never guesses.
-tools: read, grep, find, ls, bash
+tools: read, grep, find, ls, bash, ask_supervisor, ask_user_question, node_state
 defaultContext: fork
 acceptanceRole: read-only
 turnBudget: {"maxTurns": 20, "graceTurns": 3}

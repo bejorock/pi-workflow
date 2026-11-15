@@ -8,6 +8,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import { readChildToolAllowlist } from "./tool-availability.ts";
 
 export type SessionMode = "normal" | "plan" | "workflow";
 
@@ -182,7 +183,8 @@ export function registerWorkflowMode(
 		state.currentMode = mode;
 
 		const baseTools = state.toolsBeforeWorkflowMode ?? [];
-		const activeTools = getActiveModeTools(mode, baseTools);
+		const childAllowlist = readChildToolAllowlist();
+		const activeTools = getActiveModeTools(mode, baseTools).filter(name => childAllowlist === undefined || childAllowlist.includes(name));
 		try {
 			pi.setActiveTools?.(activeTools);
 		} catch {

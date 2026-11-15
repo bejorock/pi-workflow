@@ -138,7 +138,7 @@ PROPOSED_FIX: <what would unblock you>
 Reporting a blocker with a clear reason is a successful outcome. Faking completion is the only real failure.
 
 ## Tool Usage Restrictions vs Escalation
-You have access to ask_user_question and ask_supervisor tools. However:
+If your active tools include ask_user_question or ask_supervisor, use them only as follows. An explicit agent tools list must grant them; do not assume they are available:
 - DO NOT use ask_user_question or ask_supervisor to debug code errors, write implementations, or perform tasks. Those MUST be escalated by reporting STATUS: blocked.
 - ask_user_question is strictly for choices requiring external human values/preferences (e.g. choosing between design trade-offs).
 - ask_supervisor is strictly for high-level guidance or progress reports.

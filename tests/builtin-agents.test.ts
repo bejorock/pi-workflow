@@ -40,12 +40,21 @@ describe("bundled agents", () => {
 		const { agents } = discoverAgents("/nonexistent-project", "project");
 		const green = agents.find((a) => a.name === "green")!;
 
-		expect(green.tools).toEqual(["read", "write", "edit", "bash", "grep", "find", "ls"]);
+		expect(green.tools).toEqual(["read", "write", "edit", "bash", "grep", "find", "ls", "ask_supervisor", "ask_user_question", "node_state"]);
 		expect(green.defaultContext).toBe("fork");
 		expect(green.acceptanceRole).toBe("writer");
 		// Regression: inline-map frontmatter must decode to an object, not throw.
 		expect(green.turnBudget).toEqual({ maxTurns: 25, graceTurns: 4 });
 		expect(green.acceptance).toEqual({ level: "checked" });
+	});
+
+	it("explicitly grants bundled roles their coordination and artifact tools", () => {
+		const { agents } = discoverAgents("/nonexistent-project", "project");
+		for (const agent of agents) {
+			expect(agent.tools).toEqual(expect.arrayContaining(["ask_supervisor", "ask_user_question", "node_state"]));
+		}
+		expect(agents.find(a => a.name === "planner")?.tools).toContain("plan");
+		expect(agents.find(a => a.name === "architect")?.tools).toContain("contract");
 	});
 
 	it("gives read-only roles no write tools", () => {
@@ -112,6 +121,16 @@ describe("agent source precedence", () => {
 			`---\nname: ${name}\ndescription: ${description}\n---\n\n# ${name}\n\nBody for ${name}, long enough to be a real prompt body.\n`,
 		);
 	}
+
+	it("distinguishes omitted tools from explicit empty frontmatter lists", () => {
+		for (const [name, field] of [["defaults", ""], ["empty", "tools: []\n"], ["blank", "tools:\n"]]) {
+			fs.writeFileSync(path.join(builtinDir, `${name}.md`), `---\nname: ${name}\ndescription: test\n${field}---\nBody`);
+		}
+		const { agents } = discoverAgents(tempDir, "project", { builtinDir });
+		expect(agents.find(a => a.name === "defaults")?.tools).toBeUndefined();
+		expect(agents.find(a => a.name === "empty")?.tools).toEqual([]);
+		expect(agents.find(a => a.name === "blank")?.tools).toEqual([]);
+	});
 
 	it("loads builtins when no project agent shadows them", () => {
 		writeAgent(builtinDir, "planner", "builtin planner");

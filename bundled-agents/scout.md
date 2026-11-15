@@ -1,7 +1,7 @@
 ---
 name: scout
 description: Fast codebase reconnaissance. Locates relevant files and entry points; does not analyze deeply.
-tools: read, grep, find, ls
+tools: read, grep, find, ls, ask_supervisor, ask_user_question, node_state
 defaultContext: fresh
 acceptanceRole: read-only
 turnBudget: {"maxTurns": 8, "graceTurns": 1}

@@ -592,7 +592,7 @@ optional. See the bundled agents in `bundled-agents/` for complete, working exam
 name: migrator
 description: Writes database migrations from a schema diff.
 model: claude-sonnet-4
-tools: read, write, edit, bash, grep
+tools: read, write, edit, bash, grep, ask_supervisor, ask_user_question
 turnBudget: {"maxTurns": 15, "graceTurns": 2}
 acceptance:
   level: checked
@@ -625,7 +625,7 @@ Escalating with a clear reason is a good outcome. Faking completion is the only 
 
 The graph routes on a structured signal, not prose. When an agent cannot finish, it emits the
 `STATUS: blocked` block above and the edge condition routes the blocker to whoever owns the
-problem. This is the entire coordination mechanism — **there is no other channel.**
+problem. Agents with `ask_supervisor` in their tool list can also request a decision from the parent AI.
 
 **The protocol is auto-injected into every workflow agent's system prompt at spawn time.** A
 custom agent whose `.md` omits the `## Escalation` section still receives it — it can always
@@ -657,7 +657,24 @@ Two principles that make a custom agent safe in a graph, borrowed from the bundl
 
 ## Tools
 
-All tools are available to every agent and subagent automatically — no frontmatter declaration needed for the tools marked *always injected* below.
+Agent frontmatter controls model tool access identically for direct subagents and workflow agent nodes:
+
+- Omit `tools` to use all normally available tools (subject to capability ceilings and runtime restrictions).
+- Set `tools: grep, bash, ls` to expose **only** those tools.
+- Add `ask_supervisor` and/or `ask_user_question` explicitly if a restricted agent should ask questions.
+- Artifact tools (`plan`, `contract`) and workflow-only `node_state` obey the same allowlist.
+- `tools: []` (or an empty `tools:` field) deliberately exposes no tools.
+
+Tool registration and extension loading do not grant additional model tool access. Permission rules
+such as `permission: { ask_supervisor: allow }` do not add a tool omitted from `tools`.
+An agent with lazy-loaded skills must include `read` in an explicit list; otherwise launch fails with
+a configuration error rather than silently adding it. The sole runtime protocol exception is
+`structured_output`, added when a workflow node explicitly requests an `outputSchema`.
+Existing custom agents with restricted lists must add coordination/artifact tools they previously
+received implicitly. Bundled agents declare their needed tools explicitly.
+
+This is model tool scoping, not an OS security sandbox: for example, allowing `bash` still permits
+shell commands. Without question tools, an agent can still report a blocker in its final output.
 
 ### `workflow`
 
@@ -681,13 +698,13 @@ Answers a pending `ask_supervisor` question from a subagent. Called automaticall
 agent receives a `workflow-agent-question` message — the question and a receipt appear inline so
 the main agent can respond immediately via this tool.
 
-### `ask_user_question` *(always injected)*
+### `ask_user_question`
 
 Called by a subagent or workflow node to ask the user a question directly. The question appears as
 a TUI dialog; the subagent blocks indefinitely until the user answers (no timeout). Use for
 decisions only the user can make. Do not use to report errors — escalate via `STATUS: blocked`.
 
-### `ask_supervisor` *(always injected)*
+### `ask_supervisor`
 
 Called by a subagent or workflow node to ask the main agent a question. The main agent detaches
 from the child's tool call and receives the question inline. If unanswered within 10 minutes the
@@ -729,7 +746,7 @@ later with `resumeRunId`. Only runs tracked live in this process can actually be
 visible solely as a persisted journal entry (started by a different session/process) is reported
 as not stoppable from here rather than silently ignored.
 
-### `plan` *(always injected)*
+### `plan`
 
 Creates and manages Markdown plans stored in `.pi-workflow/plans/`. Available in **all modes**
 including plan mode (where `write`/`edit` are blocked). Typically produced by the `planner` agent;
@@ -743,7 +760,7 @@ any agent can read.
 | `edit` | Precision find-and-replace (`oldText` must match exactly once) |
 | `delete` | Remove a plan |
 
-### `contract` *(always injected)*
+### `contract`
 
 Creates and manages versioned contracts stored in `.pi-workflow/contracts/`. Available in all
 modes. Typically produced by the `architect` agent; any agent can read.
@@ -762,7 +779,7 @@ modes. Typically produced by the `architect` agent; any agent can read.
 **Discipline:** always call `propose` when done writing. Consumers should only act on `proposed`
 contracts — a `draft` may still be changing.
 
-### `node_state` *(always injected — workflow-only)*
+### `node_state` *(workflow-only)*
 
 Accumulates intermediate findings into a durable, per-node buffer that survives context
 compaction. Use it when a node searches many files or runs for a long time — write each finding

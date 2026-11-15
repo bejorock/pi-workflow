@@ -1,7 +1,7 @@
 ---
 name: architect
 description: Designs interfaces, types, and contracts before implementation. Read-only; owns the contract.
-tools: read, grep, find, ls
+tools: read, grep, find, ls, ask_supervisor, ask_user_question, node_state, contract
 defaultContext: fork
 acceptanceRole: read-only
 turnBudget: {"maxTurns": 12, "graceTurns": 2}

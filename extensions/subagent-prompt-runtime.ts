@@ -21,7 +21,7 @@ import { createStructuredOutputToolParameters, STRUCTURED_OUTPUT_CAPTURE_ENV, ST
 import { TOOL_BUDGET_ENV, TOOL_BUDGET_ZERO_AUTH_ENV, decodeToolBudgetEnv, shouldBlockToolForBudget, toolBudgetBlockedMessage, toolBudgetSoftNudge } from "./tool-budget.ts";
 import { TURN_BUDGET_ENV, decodeTurnBudgetEnv, turnBudgetSoftBlockMessage } from "./turn-budget.ts";
 import type { ResolvedTurnBudget } from "./types.ts";
-import { CHILD_TOOL_DIAGNOSTIC_PATH_ENV, MCP_DIRECT_CHILD_TOOLS_ENV, REQUIRED_CHILD_TOOLS_ENV, writeChildToolDiagnostic, type ChildToolDiagnostic } from "./tool-availability.ts";
+import { CHILD_TOOL_DIAGNOSTIC_PATH_ENV, MCP_DIRECT_CHILD_TOOLS_ENV, REQUIRED_CHILD_TOOLS_ENV, registerChildToolAllowlist, writeChildToolDiagnostic, type ChildToolDiagnostic } from "./tool-availability.ts";
 import { SUBAGENT_CHILD_AGENT_ENV, SUBAGENT_CHILD_INDEX_ENV, SUBAGENT_FANOUT_CHILD_ENV } from "./pi-args.ts";
 import { registerChildWatchdog } from "./watchdog/child-status.ts";
 import type { JsonSchemaObject, ResolvedToolBudget } from "./types.ts";
@@ -210,7 +210,7 @@ function refreshChildToolDiagnostic(pi: ExtensionAPI): ChildToolDiagnostic | und
 	const filePath = process.env[CHILD_TOOL_DIAGNOSTIC_PATH_ENV]?.trim();
 	const required = readRequiredChildTools();
 	if (!filePath || !required) return undefined;
-	const available = pi.getAllTools().map((tool) => tool.name);
+	const available = pi.getActiveTools();
 	return writeChildToolDiagnostic(filePath, required, available, process.env[SUBAGENT_CHILD_AGENT_ENV]?.trim(), readMcpDirectChildTools());
 }
 
@@ -261,6 +261,7 @@ export function registerTurnBudget(pi: ExtensionAPI, budget: ResolvedTurnBudget 
 }
 
 export default function registerSubagentPromptRuntime(pi: ExtensionAPI): void {
+	registerChildToolAllowlist(pi);
 	registerToolBudget(pi, decodeToolBudgetEnv(process.env[TOOL_BUDGET_ENV], { allowZero: process.env[TOOL_BUDGET_ZERO_AUTH_ENV] === "1" }));
 	registerTurnBudget(pi, decodeTurnBudgetEnv(process.env[TURN_BUDGET_ENV]));
 	registerChildWatchdog(pi);

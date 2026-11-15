@@ -100,13 +100,19 @@ describe("pi-args", () => {
 			expect(plan.configuredExtensions).toEqual([]);
 		});
 
-		it("should add read tool when requireReadTool is true", () => {
-			const plan = resolvePiLaunchToolPlan({
-				tools: ["write"],
-				requireReadTool: true,
-			});
-			expect(plan.declaredBuiltinTools).toContain("read");
-			expect(plan.declaredBuiltinTools).toContain("write");
+		it("requires an explicit read grant for lazy skills instead of widening tools", () => {
+			for (const tools of [[], ["write"]]) {
+				expect(() => resolvePiLaunchToolPlan({ tools, requireReadTool: true })).toThrow("Add read to tools");
+			}
+			expect(resolvePiLaunchToolPlan({ tools: ["read"], requireReadTool: true }).effectiveToolAllowlist).toEqual(["read"]);
+			expect(resolvePiLaunchToolPlan({ requireReadTool: true }).explicitToolAllowlist).toBe(false);
+		});
+
+		it("includes coordination and artifact tools only when explicitly listed", () => {
+			const tools = ["grep", "bash", "ls", "ask_supervisor", "ask_user_question", "plan", "contract", "node_state"];
+			expect(resolvePiLaunchToolPlan({ tools }).effectiveToolAllowlist).toEqual(tools);
+			expect(resolvePiLaunchToolPlan({ tools: ["grep", "bash", "ls"] }).effectiveToolAllowlist).toEqual(["grep", "bash", "ls"]);
+			expect(resolvePiLaunchToolPlan({ tools: [], structuredOutput: true }).effectiveToolAllowlist).toEqual(["structured_output"]);
 		});
 	});
 
@@ -137,6 +143,17 @@ describe("pi-args", () => {
 			expect(result.args).toContain("-p");
 			expect(result.args).toContain("--no-session");
 			expect(result.args).toContain("Task: Hello world");
+		});
+
+		it("clears inherited child policy when a child uses defaults", () => {
+			process.env.PI_SUBAGENT_TOOL_ALLOWLIST = '["read"]';
+			process.env.PI_SUBAGENT_REQUIRED_CHILD_TOOLS = '["read"]';
+			process.env.PI_SUBAGENT_CHILD_TOOL_DIAGNOSTIC_PATH = "/parent/diagnostic.json";
+			const result = buildPiArgs({ baseArgs: [], task: "test", sessionEnabled: false, inheritProjectContext: true, inheritSkills: true });
+			const childEnv = { ...process.env, ...result.env };
+			expect(childEnv.PI_SUBAGENT_TOOL_ALLOWLIST).toBeUndefined();
+			expect(childEnv.PI_SUBAGENT_REQUIRED_CHILD_TOOLS).toBeUndefined();
+			expect(childEnv.PI_SUBAGENT_CHILD_TOOL_DIAGNOSTIC_PATH).toBeUndefined();
 		});
 
 		it("should add --no-session when sessionEnabled is false", () => {
@@ -209,11 +226,11 @@ describe("pi-args", () => {
 			const toolsIndex = result.args.indexOf("--tools");
 			expect(result.args[toolsIndex + 1]).toContain("read");
 			expect(result.args[toolsIndex + 1]).toContain("write");
-			expect(result.args[toolsIndex + 1]).toContain("ask_user_question");
-			expect(result.args[toolsIndex + 1]).toContain("ask_supervisor");
+			expect(result.args[toolsIndex + 1]).toBe("read,write");
+			expect(result.env.PI_SUBAGENT_TOOL_ALLOWLIST).toBe('["read","write"]');
 		});
 
-		it("should add only internal tools when tools array is empty", () => {
+		it("should grant no tools when tools array is empty", () => {
 			const result = buildPiArgs({
 				baseArgs: ["--mode", "json", "-p"],
 				task: "test",
@@ -222,9 +239,9 @@ describe("pi-args", () => {
 				inheritProjectContext: true,
 				inheritSkills: true,
 			});
-			expect(result.args).toContain("--tools");
-			const toolsIndex = result.args.indexOf("--tools");
-			expect(result.args[toolsIndex + 1]).toBe("ask_user_question,ask_supervisor,plan,contract,node_state");
+			expect(result.args).toContain("--no-tools");
+			expect(result.args).not.toContain("--tools");
+			expect(result.env.PI_SUBAGENT_TOOL_ALLOWLIST).toBe("[]");
 		});
 
 		it("should add --no-skills when inheritSkills is false", () => {
@@ -291,7 +308,7 @@ describe("pi-args", () => {
 			expect(result.args).toContain("--extension");
 		});
 
-		it("should inject ask_user_question and ask_supervisor into REQUIRED_CHILD_TOOLS env", () => {
+		it("should diagnose only explicitly required child tools", () => {
 			const result = buildPiArgs({
 				baseArgs: ["--mode", "json", "-p"],
 				task: "test",
@@ -303,10 +320,7 @@ describe("pi-args", () => {
 			const envVal = result.env.PI_SUBAGENT_REQUIRED_CHILD_TOOLS;
 			expect(envVal).toBeDefined();
 			const parsed = JSON.parse(envVal!);
-			expect(parsed).toContain("ask_user_question");
-			expect(parsed).toContain("ask_supervisor");
-			expect(parsed).toContain("plan");
-			expect(parsed).toContain("contract");
+			expect(parsed).toEqual(["read", "write"]);
 		});
 
 		it("should write system prompt to temp file", () => {

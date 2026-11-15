@@ -294,6 +294,7 @@ Workflows support two distinct ways to bring external judgment or decisions into
    - **Rule:** Always specify a `default` fallback for human nodes so a headless run (no TUI) does not hang.
 
 2. **In-Flight Tools (`ask_user_question`, `ask_supervisor`)**
+   - **Tool access:** An omitted agent `tools` field uses normal defaults. An explicit list is authoritative, including these question tools, `plan`, `contract`, and `node_state`; add each needed name. `tools: []` grants no tools. Permission rules do not grant omitted tools. Both direct subagents and workflow agents follow this policy. Lazy skills require an explicit `read` grant. Only `structured_output` is added implicitly when a node requests `outputSchema`.
    - **Purpose:** Prompting for details *while an agent is executing* inside its node.
    - **`ask_user_question`**: Spawns a custom questionnaire dialog to ask the user. Used when an agent needs user values or design preferences to proceed.
    - **`ask_supervisor`**: Child agents call this to ask the main agent (the supervisor) for instructions or to report progress.
@@ -632,7 +633,7 @@ Create agent files in `~/.pi/agent/agents/*.md` (user scope) or `.pi/agents/*.md
 name: scout
 description: Lightweight exploration agent that finds security issues and code smells.
 model: google/gemini-2.5-flash
-tools: read, grep, bash
+tools: read, grep, bash, ask_supervisor, ask_user_question
 turnBudget: {"maxTurns": 5, "graceTurns": 1}
 acceptance:
   level: none

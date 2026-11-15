@@ -1,7 +1,7 @@
 ---
 name: reviewer
 description: Independent code review of an implementation. Read-only; did not write the code.
-tools: read, grep, find, ls, bash
+tools: read, grep, find, ls, bash, ask_supervisor, ask_user_question, node_state
 defaultContext: fork
 acceptanceRole: read-only
 turnBudget: {"maxTurns": 12, "graceTurns": 2}

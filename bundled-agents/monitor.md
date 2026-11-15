@@ -1,7 +1,7 @@
 ---
 name: monitor
 description: Independently reviews a plan for feasibility before implementation starts. Read-only gate.
-tools: read, grep, find, ls
+tools: read, grep, find, ls, ask_supervisor, ask_user_question, node_state
 defaultContext: fork
 acceptanceRole: read-only
 turnBudget: {"maxTurns": 10, "graceTurns": 2}

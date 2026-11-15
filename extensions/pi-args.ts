@@ -15,7 +15,7 @@ import { TEMP_ROOT_DIR, type JsonSchemaObject, type ResolvedToolBudget, type Res
 import { THINKING_LEVELS } from "./model-info.ts";
 import { TOOL_BUDGET_ENV, TOOL_BUDGET_ZERO_AUTH_ENV, encodeToolBudgetEnv } from "./tool-budget.ts";
 import { TURN_BUDGET_ENV, encodeTurnBudgetEnv } from "./turn-budget.ts";
-import { CHILD_TOOL_DIAGNOSTIC_PATH_ENV, MCP_DIRECT_CHILD_TOOLS_ENV, REQUIRED_CHILD_TOOLS_ENV } from "./tool-availability.ts";
+import { CHILD_TOOL_ALLOWLIST_ENV, CHILD_TOOL_DIAGNOSTIC_PATH_ENV, MCP_DIRECT_CHILD_TOOLS_ENV, REQUIRED_CHILD_TOOLS_ENV } from "./tool-availability.ts";
 import { SUBAGENT_CAPABILITY_CEILING_ENV, decodeSubagentCapabilityCeiling, encodeSubagentCapabilityCeiling, intersectSubagentCapabilityCeilings, type ResolvedSubagentCapabilityCeiling, type SubagentCapabilityAudit } from "./capability-ceiling.ts";
 
 const TASK_ARG_LIMIT = 8000;
@@ -153,29 +153,25 @@ export function resolvePiLaunchToolPlan(input: ResolvePiLaunchToolPlanInput): Pi
 	if (input.requireReadTool && allowedToolSet && !allowedToolSet.has("read")) {
 		throw new Error(`Capability ceiling from ${capabilityCeiling?.sources.join(", ") || "unknown source"} excludes required tool 'read' for lazy skill loading.`);
 	}
+	if (input.requireReadTool && input.tools !== undefined && !requestedBuiltinTools.includes("read")) {
+		throw new Error("Agent tools excludes required tool 'read' for lazy skill loading. Add read to tools or remove the agent's skills.");
+	}
 	const declaredBuiltinTools = input.tools === undefined
 		? (allowedToolSet ? [...allowedToolSet] : [])
-		: (input.requireReadTool && requestedBuiltinTools.length > 0 && !requestedBuiltinTools.includes("read") && !allowedToolSet
-			? ["read", ...requestedBuiltinTools]
-			: requestedBuiltinTools).filter((tool) => !allowedToolSet || allowedToolSet.has(tool));
+		: requestedBuiltinTools.filter((tool) => !allowedToolSet || allowedToolSet.has(tool));
 	const fanoutAuthorized = declaredBuiltinTools.includes("subagent");
 	const toolExtensionPaths: string[] = capabilityCeiling?.denyExtensions ? [] : (input.tools ?? []).filter((tool) => !requestedBuiltinTools.includes(tool) && (tool.includes("/") || tool.endsWith(".ts") || tool.endsWith(".js")));
 	const resolvedMcpSelections = capabilityCeiling?.denyExtensions ? [] : resolveMcpDirectToolSelections(input.mcpDirectTools, input.cwd);
 	const effectiveMcpSelections = resolvedMcpSelections.filter((selection) => !allowedToolSet || allowedToolSet.has(selection.name));
 	const effectiveMcpTools = effectiveMcpSelections.map((selection) => selection.name);
 	const explicitToolAllowlist = input.tools !== undefined || (input.mcpDirectTools?.length ?? 0) > 0 || allowedToolSet !== undefined;
-	const internalTools = [
-		"ask_user_question",
-		"ask_supervisor",
-		"plan",
-		"contract",
-		"node_state",
-		...(input.structuredOutput ? ["structured_output"] : []),
-	];
+	// The only implicit tool is the completion protocol explicitly requested by
+	// outputSchema. Coordination and artifact tools obey the agent allowlist.
+	const internalTools = input.structuredOutput ? ["structured_output"] : [];
 	const effectiveToolAllowlist = [...new Set([...declaredBuiltinTools, ...effectiveMcpTools, ...internalTools])];
 	const requiredChildTools = explicitToolAllowlist ? [...new Set([
-		...(input.tools !== undefined ? declaredBuiltinTools : []),
-		...(input.mcpDirectTools?.length ? effectiveMcpTools : []),
+		...declaredBuiltinTools,
+		...effectiveMcpTools,
 		...internalTools,
 	])] : [];
 	const runtimeExtensions = [
@@ -301,6 +297,11 @@ export function buildPiArgs(input: BuildPiArgsInput): BuildPiArgsResult {
 		env[REQUIRED_CHILD_TOOLS_ENV] = JSON.stringify(toolPlan.requiredChildTools);
 		env[CHILD_TOOL_DIAGNOSTIC_PATH_ENV] = toolDiagnosticPath;
 	}
+	// Explicitly clear inherited policy for unrestricted children; nested children
+	// get their own resolved policy (including any inherited capability ceiling).
+	env[CHILD_TOOL_ALLOWLIST_ENV] = toolPlan.explicitToolAllowlist ? JSON.stringify(toolPlan.effectiveToolAllowlist) : undefined;
+	env[REQUIRED_CHILD_TOOLS_ENV] ??= undefined;
+	env[CHILD_TOOL_DIAGNOSTIC_PATH_ENV] ??= undefined;
 	env[MCP_DIRECT_CHILD_TOOLS_ENV] = toolPlan.effectiveMcpTools.length > 0 ? JSON.stringify(toolPlan.effectiveMcpTools) : undefined;
 	env[SUBAGENT_CHILD_ENV] = "1";
 	env[SUBAGENT_FANOUT_CHILD_ENV] = toolPlan.fanoutAuthorized ? "1" : "0";

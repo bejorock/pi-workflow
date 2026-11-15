@@ -231,7 +231,7 @@ function loadAgentsFromDir(dir: string, source: AgentSource): AgentConfig[] {
 		}
 
 		// Parse array/list fields (comma-separated or YAML list)
-		const tools = parseStringOrArray(frontmatter.tools);
+		const tools = frontmatter.tools === null ? [] : parseStringOrArray(frontmatter.tools);
 		const extensions = parseStringOrArray(frontmatter.extensions);
 		const subagentOnlyExtensions = parseStringOrArray(frontmatter.subagentOnlyExtensions);
 		const fallbackModels = parseStringOrArray(frontmatter.fallbackModels);
@@ -305,7 +305,7 @@ function loadAgentsFromDir(dir: string, source: AgentSource): AgentConfig[] {
 			name: String(frontmatter.name),
 			description: String(frontmatter.description),
 			package: frontmatter.package ? String(frontmatter.package) : undefined,
-			tools: tools && tools.length > 0 ? tools : undefined,
+			tools,
 			mcpDirectTools: mcpDirectTools.length > 0 ? mcpDirectTools : undefined,
 			extensions,
 			subagentOnlyExtensions,

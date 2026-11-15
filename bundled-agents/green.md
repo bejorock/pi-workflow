@@ -1,7 +1,7 @@
 ---
 name: green
 description: Implements code until the failing tests pass. Escalates instead of faking when blocked.
-tools: read, write, edit, bash, grep, find, ls
+tools: read, write, edit, bash, grep, find, ls, ask_supervisor, ask_user_question, node_state
 defaultContext: fork
 acceptanceRole: writer
 turnBudget: {"maxTurns": 25, "graceTurns": 4}
