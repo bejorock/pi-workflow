@@ -211,6 +211,12 @@ g.node('review_spec', human('Accept the proposed contract?', {
 }));
 ```
 
+In-flight `ask` questions support 1–4 single-select questions, not multi-select. The built-in
+**Reply in chat** choice is a follow-up request, not acceptance, rejection, or collected custom text.
+Ask the user to explain in ordinary chat and wait; do not open another form. Human gates return
+`status: "blocked"` and `requiresChatReply: true`; route that result for follow-up rather than
+accepting the contract or using the default.
+
 This human decision does not replace the contract lifecycle: the producer must still call `propose`
 when the draft is final, and consumers must check its status. See `pi-workflow` → **Human-facing text limits**.
 

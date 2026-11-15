@@ -700,8 +700,8 @@ the main agent can respond immediately via this tool.
 
 ### `ask`
 
-Called by a subagent or workflow node to ask the user a question directly. The question appears as
-a TUI dialog; the subagent blocks indefinitely until the user answers (no timeout). Use for
+Called by the parent agent, a subagent, or a workflow node to ask the user a question directly.
+The question appears as a TUI dialog; the caller waits until the user submits or cancels (no timeout). Use for
 decisions only the user can make. Do not use to report errors — escalate via `STATUS: blocked`.
 
 `ask` replaces `ask_user_question` without an alias. Update custom agent `tools` and permission
@@ -709,7 +709,9 @@ rules to use `ask`; explicit allowlists are not widened automatically.
 
 The questionnaire supports **1–4 single-select questions**, descriptions, and Markdown option
 previews. Multiple questions use tabs and require a complete final submission. There are no
-multi-select checkboxes, per-option notes, partial submissions, or separate chat-answer kinds.
+multi-select checkboxes, per-option notes, or partial submissions. **Multiple questions** are supported;
+**multiple selections within one question** are not. A chat handoff is returned as `kind: "chat"`,
+not as a custom-text answer or a preset decision.
 Every question includes **Reply in chat**: selecting it closes the choice form and returns a
 chat-follow-up request to the agent. No extra input dialog opens. The agent should ask you to
 type your preference in ordinary chat and wait for your message, not choose a preset or open
@@ -724,8 +726,14 @@ requests and workflow human gates. No generic approval action is created; answer
 verified terminal-input path. Moshi is optional: no daemon is installed or launched, and a missing
 or unreachable socket does not prevent local answers. `MOSHI_SOCKET_PATH` overrides socket
 discovery. Phone preview payloads are capped at 8 KiB of UTF-8 text per option; terminal previews
-remain scrollable with PgUp/PgDn. Moshi's current Pi adapter rejects multi-select and direct
-free-text form answers, which is why custom preferences use an ordinary-chat follow-up instead.
+remain scrollable with PgUp/PgDn. Markdown preview rendering has been verified on the phone.
+
+Moshi's current Pi adapter rejects multi-select and direct free-text form answers, which is why
+custom preferences use an ordinary-chat follow-up instead. The phone may display multi-select
+controls even though submission is unsupported: a real phone submission was rejected by the
+daemon with `invalid question answer: pi does not support multi-select questions`. The phone
+showed a generic “terminal question may have changed” message even though the form had not
+changed. Visible controls alone do not establish that the adapter can deliver those answers.
 
 ### `ask_supervisor`
 
