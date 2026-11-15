@@ -710,10 +710,13 @@ rules to use `ask`; explicit allowlists are not widened automatically.
 The questionnaire supports **1–4 single-select questions**, descriptions, and Markdown option
 previews. Multiple questions use tabs and require a complete final submission. There are no
 multi-select checkboxes, per-option notes, partial submissions, or separate chat-answer kinds.
-Every question includes **Reply in chat**: selecting it closes the choice form and opens a text
-input while the tool remains pending. Type your preference there, or send ordinary Chat View
-text from Moshi. The resulting text is returned as a custom answer, not a preset decision.
-Escape (including cancelling custom text) cancels the entire questionnaire without partial answers.
+Every question includes **Reply in chat**: selecting it closes the choice form and returns a
+chat-follow-up request to the agent. No extra input dialog opens. The agent should ask you to
+type your preference in ordinary chat and wait for your message, not choose a preset or open
+another questionnaire. A child agent should hand this request back to its supervisor. For human
+gates, this is a blocked result (`requiresChatReply: true`), not approval or a default decision;
+route it back for follow-up rather than continuing as though a choice was made.
+Escape cancels the entire questionnaire without partial answers.
 
 When an existing local Moshi daemon is available, displayed terminal forms publish native
 `QuestionAsked` / `QuestionResolved` state with the parent Pi session identity, including child
@@ -722,7 +725,7 @@ verified terminal-input path. Moshi is optional: no daemon is installed or launc
 or unreachable socket does not prevent local answers. `MOSHI_SOCKET_PATH` overrides socket
 discovery. Phone preview payloads are capped at 8 KiB of UTF-8 text per option; terminal previews
 remain scrollable with PgUp/PgDn. Moshi's current Pi adapter rejects multi-select and direct
-free-text form answers, which is why the shared form uses the two-step custom-answer flow.
+free-text form answers, which is why custom preferences use an ordinary-chat follow-up instead.
 
 ### `ask_supervisor`
 

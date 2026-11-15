@@ -33,6 +33,7 @@ import {
 } from "./types.ts";
 import { getFinalOutput } from "./utils.ts";
 import { questionLengthError, questionHeader } from "./question-limits.ts";
+import { CHAT_REPLY_INSTRUCTION } from "./moshi-questions.ts";
 
 /**
  * Structured view of an agent's reply, after escalation parsing.
@@ -447,6 +448,19 @@ export function createNodeRunner(options: CreateNodeRunnerOptions): NodeRunner {
 								status: "skipped",
 								text: "",
 								reason: result.reason ?? "Cancelled by user.",
+								prompt,
+							}),
+						};
+					}
+
+					if (result.answers?.questions?.some((answer) => answer.kind === "chat")) {
+						return {
+							result: withResultText({
+								status: "blocked",
+								blockedOn: "human",
+								requiresChatReply: true,
+								text: CHAT_REPLY_INSTRUCTION,
+								reason: "User requested ordinary-chat follow-up; no decision was made.",
 								prompt,
 							}),
 						};

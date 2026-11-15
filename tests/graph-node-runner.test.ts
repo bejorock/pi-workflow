@@ -636,6 +636,21 @@ describe("createNodeRunner: interactive nodes", () => {
 		expect(`Chosen mode: "${outcome.result}"`).toBe('Chosen mode: "fast"');
 	});
 
+	it("does not treat Reply in chat as a human decision or use an approval default", async () => {
+		const broker = new RequestBroker({coalesceMs: 0});
+		const runner = createNodeRunner({cwd, runId: "r1", spawnAgent: vi.fn() as never, broker});
+		broker.onBatch(batch => broker.resolve(batch[0].id, {
+			source: "human", text: "Reply in chat",
+			answers: {questions: [{questionIndex: 0, kind: "chat", answer: "Reply in chat"}], cancelled: false},
+		}));
+		const pending = runner({id: "gate", def: human("Approve?", {options: ["yes", "no"], default: "yes"})}, {}, {step: 1, runId: "r1"});
+		broker.tick();
+		const outcome = await pending;
+		expect(outcome.result).toMatchObject({status: "blocked", requiresChatReply: true, blockedOn: "human"});
+		expect((outcome.result as any).answer).toBeUndefined();
+		expect(`${outcome.result}`).toContain("Ask the user to type their preferred answer in ordinary chat");
+	});
+
 	it("a headless human node's default-fallback result also interpolates to its answer", async () => {
 		const runner = createNodeRunner({ cwd, runId: "r1", spawnAgent: vi.fn() as never });
 

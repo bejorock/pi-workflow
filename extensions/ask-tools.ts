@@ -18,7 +18,7 @@ import {
 import { ChannelClient } from "./channel.ts";
 import type { RequestBroker } from "./request-broker.ts";
 import { QUESTION_LIMITS } from "./question-limits.ts";
-import { CHAT_REPLY_LABEL, questionChoices } from "./moshi-questions.ts";
+import { CHAT_REPLY_LABEL, CHAT_REPLY_INSTRUCTION, questionChoices } from "./moshi-questions.ts";
 
 // ── Schemas ──────────────────────────────────────────────────────────────
 
@@ -60,8 +60,9 @@ function formatToolResultText(
 		return "No answers provided.";
 	}
 
+	const needsChat = answers.some((answer) => answer.kind === "chat");
 	return (
-		"Questions answered successfully:\n" +
+		(needsChat ? "Questionnaire returned; ordinary-chat follow-up required:\n" : "Questions answered successfully:\n") +
 		answers
 			.map((ans) => {
 				const q = questions[ans.questionIndex];
@@ -69,7 +70,8 @@ function formatToolResultText(
 				const value = ans.answer ?? "(no answer)";
 				return `- ${header}: ${value}`;
 			})
-			.join("\n")
+			.join("\n") +
+		(needsChat ? `\n\n${CHAT_REPLY_INSTRUCTION}` : "")
 	);
 }
 
@@ -86,7 +88,7 @@ export function createAskUserQuestionTool(broker?: RequestBroker): ToolDefinitio
 		label: "Ask",
 		description:
 			"Ask the user one or more questions. Can specify options (with descriptions and markdown previews), " +
-			"single-select choices, and a built-in 'Reply in chat' path for custom answers. Do not include that reserved choice yourself; omit options for a custom-only question. All questions must be answered; notes and multi-select are not supported.",
+			"single-select choices, and a built-in 'Reply in chat' choice that returns control so you can ask the user to type their preference in ordinary chat. Do not include that reserved choice yourself; omit options to request an ordinary-chat handoff. All questions must be answered; notes and multi-select are not supported.",
 		parameters: AskUserQuestionParams,
 
 		async execute(_id, params, _signal, _onUpdate, ctx) {
@@ -202,8 +204,7 @@ export function createAskUserQuestionTool(broker?: RequestBroker): ToolDefinitio
 						ans = await ctx.ui.input(`${q.question} (${i + 1}/${questions.length})`);
 					}
 
-					const custom = !q.options || ans === CHAT_REPLY_LABEL;
-					if (ans === CHAT_REPLY_LABEL) ans = await ctx.ui.input(`${q.header}: your answer`, "Describe what you prefer instead", {signal: _signal});
+					const kind = ans === CHAT_REPLY_LABEL ? "chat" : !q.options ? "custom" : "option";
 					if (ans === undefined || _signal?.aborted) {
 						return {
 							content: [{ type: "text" as const, text: "User cancelled the question." }],
@@ -213,7 +214,7 @@ export function createAskUserQuestionTool(broker?: RequestBroker): ToolDefinitio
 
 					answers.push({
 						questionIndex: i,
-						kind: custom ? "custom" : "option",
+						kind,
 						answer: ans || null,
 					});
 				}

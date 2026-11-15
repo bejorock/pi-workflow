@@ -7,8 +7,9 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { TUIQuestion } from "./ask-user-question-tui.ts";
 
 export const CHAT_REPLY_LABEL = "Reply in chat";
+export const CHAT_REPLY_INSTRUCTION = "The user chose Reply in chat instead of a preset answer. Ask the user to type their preferred answer in ordinary chat, then wait for their message. Do not open another questionnaire or input dialog, assume a preference, or treat this as approval. If you are a child agent, hand this request back to the supervisor rather than asking again.";
 export function questionChoices(question: TUIQuestion) {
-	return [...(question.options ?? []), { label: CHAT_REPLY_LABEL, description: "None of these fit? Write your own answer after closing this form." }];
+	return [...(question.options ?? []), { label: CHAT_REPLY_LABEL, description: "None of these fit? The agent will ask you to explain in ordinary chat." }];
 }
 
 export function moshiSocketPaths(): string[] {

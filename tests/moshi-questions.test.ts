@@ -42,7 +42,7 @@ describe("optional native Moshi questions", () => {
 
 describe("custom reply and cancellation", () => {
  const theme = {fg: (_:string,s:string)=>s};
- it("keeps the same tool pending for custom text and returns the text, not the reserved label", async () => {
+ it("returns the chat handoff immediately without opening a second input", async () => {
   vi.stubEnv("MOSHI_SOCKET_PATH", "/nonexistent/moshi.sock");
   const context = ctx();
   const input = vi.fn().mockResolvedValue("Use a canary instead");
@@ -50,14 +50,16 @@ describe("custom reply and cancellation", () => {
    const c = fn({requestRender(){}},theme,{},resolve); c.render(80); c.handleInput("\x1b[B"); c.handleInput("\r");
   }))} as any;
   const result = await runAskUserQuestionTUI(context, questions);
-  expect(input).toHaveBeenCalledOnce();
-  expect(result.answers).toEqual([{questionIndex:0,kind:"custom",answer:"Use a canary instead"}]);
+  expect(input).not.toHaveBeenCalled();
+  expect(result.answers).toEqual([{questionIndex:0,kind:"chat",answer:CHAT_REPLY_LABEL}]);
  });
- it("discards all partial answers if custom text is cancelled", async () => {
+ it("preserves other answers alongside an explicit chat handoff", async () => {
   vi.stubEnv("MOSHI_SOCKET_PATH", "/nonexistent/moshi.sock");
   const context = ctx();
-  context.ui = {input: vi.fn().mockResolvedValue(undefined), custom: vi.fn().mockResolvedValue({answers:[{questionIndex:0,kind:"custom",answer:CHAT_REPLY_LABEL}],cancelled:false})} as any;
-  expect(await runAskUserQuestionTUI(context,questions)).toEqual({answers:[],cancelled:true});
+  const result = {answers:[{questionIndex:0,kind:"option",answer:"A"},{questionIndex:1,kind:"chat",answer:CHAT_REPLY_LABEL}],cancelled:false};
+  context.ui = {input: vi.fn(), custom: vi.fn().mockResolvedValue(result)} as any;
+  expect(await runAskUserQuestionTUI(context,[...questions,{...questions[0],question:"Second?",header:"Second"}])).toEqual(result);
+  expect(context.ui.input).not.toHaveBeenCalled();
  });
  it("aborts an active form without opening a custom input", async () => {
   vi.stubEnv("MOSHI_SOCKET_PATH", "/nonexistent/moshi.sock");

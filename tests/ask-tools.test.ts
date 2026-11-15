@@ -98,6 +98,20 @@ describe("Ask Tools in Parent Process (direct UI calling)", () => {
 		});
 	});
 
+	it("returns chat follow-up instructions without opening an RPC input", async () => {
+		const input = vi.fn();
+		const tool = createAskUserQuestionTool();
+		const result: any = await tool.execute("chat-rpc", {
+			questions: [{question: "Pick?", header: "Pick", options: [{label: "A"}]}],
+		} as never, undefined, undefined, {
+			mode: "rpc", hasUI: true, ui: {select: vi.fn().mockResolvedValue("Reply in chat"), input},
+		} as unknown as ExtensionToolContext);
+		expect(input).not.toHaveBeenCalled();
+		expect(result.details.answers).toEqual([{questionIndex: 0, kind: "chat", answer: "Reply in chat"}]);
+		expect(result.content[0].text).toContain("Ask the user to type their preferred answer in ordinary chat");
+		expect(result.content[0].text).toContain("Do not open another questionnaire or input dialog");
+	});
+
 	it("ask validation failure", async () => {
 		const tool = createAskUserQuestionTool();
 		const res: any = await tool.execute(

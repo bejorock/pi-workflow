@@ -116,8 +116,7 @@ async function handleHumanBatch(
 						);
 					}
 
-					const custom = !q.options || answer === CHAT_REPLY_LABEL;
-					if (answer === CHAT_REPLY_LABEL) answer = await ctx.ui.input(`${q.header}: your answer`, "Describe what you prefer instead", {signal: broker.signalFor(request.id)});
+					const kind = answer === CHAT_REPLY_LABEL ? "chat" : !q.options ? "custom" : "option";
 					if (answer === undefined || answer === "") {
 						cancelled = true;
 						break;
@@ -125,7 +124,7 @@ async function handleHumanBatch(
 
 					answers.push({
 						questionIndex: i,
-						kind: custom ? "custom" : "option",
+						kind,
 						answer: answer || null,
 					});
 				}

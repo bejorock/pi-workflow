@@ -92,7 +92,7 @@ export async function runAskUserQuestionTUI(
 					if (matchesKey(data, Key.pageDown)) { previewOffset += 5; refresh(); return; }
 					if (matchesKey(data, Key.pageUp)) { previewOffset = Math.max(0, previewOffset - 5); refresh(); return; }
 					if (!matchesKey(data, Key.enter)) return;
-					answers.set(tab, { questionIndex: tab, kind: cursor === choices.length - 1 ? "custom" : "option", answer: choices[cursor].label });
+					answers.set(tab, { questionIndex: tab, kind: cursor === choices.length - 1 ? "chat" : "option", answer: choices[cursor].label });
 					if (questions.length === 1) finish(false);
 					else moveTab(tab + 1);
 				},
@@ -137,18 +137,10 @@ export async function runAskUserQuestionTUI(
 				invalidate() {},
 			};
 		});
-		// Retire the native question BEFORE opening an ordinary input dialog.
-		// Moshi refuses Chat View prompt submission while pendingPrompt exists.
+		// Clear the native form before returning control for ordinary chat.
 		if (publishTimer) clearTimeout(publishTimer);
 		await lifecycle.close();
 		if (result.cancelled || signal?.aborted) return { answers: [], cancelled: true };
-		for (const answer of result.answers) {
-			if (answer.kind !== "custom") continue;
-			const q = questions[answer.questionIndex];
-			const text = await ctx.ui.input(`${q.header}: your answer (terminal or Chat View)`, "Describe what you prefer instead", { signal });
-			if (!text?.trim() || signal?.aborted) return { answers: [], cancelled: true };
-			answer.answer = text.trim();
-		}
 		return result;
 	} finally {
 		if (publishTimer) clearTimeout(publishTimer);
