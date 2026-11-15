@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { createMoshiQuestion, CHAT_REPLY_LABEL } from "../extensions/moshi-questions.ts";
+import { createMoshiQuestion } from "../extensions/moshi-questions.ts";
 import { runAskUserQuestionTUI } from "../extensions/ask-user-question-tui.ts";
 const questions = [{question: "Pick?", header: "Pick", options: [{label: "A", preview: "😀".repeat(3000)}]}];
 const ctx = () => ({mode: "tui", cwd: "/tmp/test", sessionManager: {getSessionId: () => "parent-session", getSessionFile: () => "/tmp/session.jsonl"}} as unknown as ExtensionContext);
@@ -24,7 +24,7 @@ describe("optional native Moshi questions", () => {
    expect(messages[0]).toMatchObject({source: "pi", sessionId: "parent-session", toolName: "ask", eventName: "QuestionAsked", interactivePrompt: {toolUseId: "unique-question"}});
    expect(messages[0].actionId).toBeUndefined();
    const options = messages[0].interactivePrompt.questions[0].options;
-   expect(options.at(-1).label).toBe(CHAT_REPLY_LABEL);
+   expect(options.map((o: any) => o.label)).toEqual(["A"]);
    expect(Buffer.byteLength(options[0].preview)).toBeLessThanOrEqual(8192);
    expect(options[0].preview).not.toContain("�");
    expect(messages[1]).toMatchObject({eventName: "QuestionResolved", interactivePrompt: {toolUseId: "unique-question"}});
@@ -40,23 +40,23 @@ describe("optional native Moshi questions", () => {
  });
 });
 
-describe("custom reply and cancellation", () => {
+describe("explicit choices and cancellation", () => {
  const theme = {fg: (_:string,s:string)=>s};
- it("returns the chat handoff immediately without opening a second input", async () => {
+ it("returns even the last explicit choice as a normal option without another input", async () => {
   vi.stubEnv("MOSHI_SOCKET_PATH", "/nonexistent/moshi.sock");
   const context = ctx();
   const input = vi.fn().mockResolvedValue("Use a canary instead");
   context.ui = {input, custom: vi.fn(fn => new Promise(resolve => {
    const c = fn({requestRender(){}},theme,{},resolve); c.render(80); c.handleInput("\x1b[B"); c.handleInput("\r");
   }))} as any;
-  const result = await runAskUserQuestionTUI(context, questions);
+  const result = await runAskUserQuestionTUI(context, [{...questions[0], options: [{label:"A"},{label:"Other"}]}]);
   expect(input).not.toHaveBeenCalled();
-  expect(result.answers).toEqual([{questionIndex:0,kind:"chat",answer:CHAT_REPLY_LABEL}]);
+  expect(result.answers).toEqual([{questionIndex:0,kind:"option",answer:"Other"}]);
  });
- it("preserves other answers alongside an explicit chat handoff", async () => {
+ it("preserves ordinary answers across multiple questions", async () => {
   vi.stubEnv("MOSHI_SOCKET_PATH", "/nonexistent/moshi.sock");
   const context = ctx();
-  const result = {answers:[{questionIndex:0,kind:"option",answer:"A"},{questionIndex:1,kind:"chat",answer:CHAT_REPLY_LABEL}],cancelled:false};
+  const result = {answers:[{questionIndex:0,kind:"option",answer:"A"},{questionIndex:1,kind:"option",answer:"A"}],cancelled:false};
   context.ui = {input: vi.fn(), custom: vi.fn().mockResolvedValue(result)} as any;
   expect(await runAskUserQuestionTUI(context,[...questions,{...questions[0],question:"Second?",header:"Second"}])).toEqual(result);
   expect(context.ui.input).not.toHaveBeenCalled();

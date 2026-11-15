@@ -17,7 +17,6 @@ import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { RequestBroker, PendingRequest, BrokerResult } from "./request-broker.ts";
 import { runAskUserQuestionTUI } from "./ask-user-question-tui.ts";
-import { CHAT_REPLY_LABEL, questionChoices } from "./moshi-questions.ts";
 import type { WorkflowController } from "./workflow-controller.ts";
 import { installRelayHookSink } from "./relay-hook.ts";
 
@@ -103,20 +102,14 @@ async function handleHumanBatch(
 					const q = request.questions[i];
 					let answer: string | undefined;
 
-					if (q.options && q.options.length > 0) {
-						const labels = questionChoices(q).map((o) => o.label);
-						answer = await ctx.ui.select(
-							`${q.question} (${i + 1}/${request.questions.length}) [run: ${shortId(request.runId)}]`,
-							labels,
-						);
-					} else {
-						answer = await ctx.ui.input(
-							`${q.question} (${i + 1}/${request.questions.length}) [run: ${shortId(request.runId)}]`,
-							"Type your answer",
-						);
+					if (!q.options?.length) {
+						cancelled = true;
+						break;
 					}
-
-					const kind = answer === CHAT_REPLY_LABEL ? "chat" : !q.options ? "custom" : "option";
+					answer = await ctx.ui.select(
+						`${q.question} (${i + 1}/${request.questions.length}) [run: ${shortId(request.runId)}]`,
+						q.options.map((o) => o.label),
+					);
 					if (answer === undefined || answer === "") {
 						cancelled = true;
 						break;
@@ -124,7 +117,7 @@ async function handleHumanBatch(
 
 					answers.push({
 						questionIndex: i,
-						kind,
+						kind: "option",
 						answer: answer || null,
 					});
 				}

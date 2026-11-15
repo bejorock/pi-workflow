@@ -1,10 +1,10 @@
-/** Native Pi-style questionnaire: numbered choices, tabs, complete submission, and custom replies. */
+/** Native Pi-style questionnaire: numbered choices, tabs, complete submission, and explicit choices. */
 import { Key, matchesKey, Markdown, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { getMarkdownTheme, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
 import { stripVTControlCharacters } from "node:util";
 import { questionLengthError } from "./question-limits.ts";
-import { CHAT_REPLY_LABEL, createMoshiQuestion, questionChoices } from "./moshi-questions.ts";
+import { createMoshiQuestion } from "./moshi-questions.ts";
 
 export interface TUIOption { label: string; description?: string; preview?: string; }
 export interface TUIQuestion { question: string; header: string; options?: TUIOption[]; multiSelect?: boolean; }
@@ -19,9 +19,8 @@ export interface TUIResult {
 	answers: TUIAnswer[];
 	cancelled: boolean;
 	error?: "no_ui" | "no_questions" | "too_many_questions" | "duplicate_question" | "duplicate_option_label" |
-		"reserved_label" | "empty_options" | "multi_select_unsupported" | `Question ${string}`;
+		"empty_options" | "multi_select_unsupported" | `Question ${string}`;
 }
-const RESERVED = new Set(["other", "type something.", CHAT_REPLY_LABEL.toLowerCase()]);
 export function validateQuestions(questions: TUIQuestion[]): TUIResult["error"] | undefined {
 	if (!questions?.length) return "no_questions";
 	if (questions.length > 4) return "too_many_questions";
@@ -33,19 +32,18 @@ export function validateQuestions(questions: TUIQuestion[]): TUIResult["error"] 
 		const key = q.question.trim().toLowerCase();
 		if (seen.has(key)) return "duplicate_question";
 		seen.add(key);
-		if (q.options?.length === 0) return "empty_options";
+		if (!q.options?.length) return "empty_options";
 		const labels = new Set<string>();
 		for (const option of q.options ?? []) {
 			const label = option.label.trim().toLowerCase();
 			if (labels.has(label)) return "duplicate_option_label";
 			labels.add(label);
-			if (RESERVED.has(label)) return "reserved_label";
 		}
 	}
 }
 const clean = (text: string) => stripVTControlCharacters(text).replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "");
 
-/** The custom-reply row is part of the published choices, so the phone can select it too. */
+/** Display exactly the supplied choices locally and in optional native Moshi state. */
 export async function runAskUserQuestionTUI(
 	ctx: ExtensionContext, questions: TUIQuestion[], signal?: AbortSignal, toolUseId = `ask-${randomUUID()}`,
 ): Promise<TUIResult> {
@@ -86,13 +84,13 @@ export async function runAskUserQuestionTUI(
 						if (matchesKey(data, Key.enter) && allAnswered()) finish(false);
 						return;
 					}
-					const choices = questionChoices(questions[tab]);
+					const choices = questions[tab].options!;
 					if (matchesKey(data, Key.up)) { cursor = Math.max(0, cursor - 1); previewOffset = 0; refresh(); return; }
 					if (matchesKey(data, Key.down)) { cursor = Math.min(choices.length - 1, cursor + 1); previewOffset = 0; refresh(); return; }
 					if (matchesKey(data, Key.pageDown)) { previewOffset += 5; refresh(); return; }
 					if (matchesKey(data, Key.pageUp)) { previewOffset = Math.max(0, previewOffset - 5); refresh(); return; }
 					if (!matchesKey(data, Key.enter)) return;
-					answers.set(tab, { questionIndex: tab, kind: cursor === choices.length - 1 ? "chat" : "option", answer: choices[cursor].label });
+					answers.set(tab, { questionIndex: tab, kind: "option", answer: choices[cursor].label });
 					if (questions.length === 1) finish(false);
 					else moveTab(tab + 1);
 				},
@@ -114,7 +112,7 @@ export async function runAskUserQuestionTUI(
 						const q = questions[tab];
 						add(` ${clean(q.question)}`);
 						lines.push("");
-						const choices = questionChoices(q);
+						const choices = q.options!;
 						for (let i = 0; i < choices.length; i++) {
 							add(`${i === cursor ? "> " : "  "}${i + 1}. ${clean(choices[i].label)}`);
 							if (choices[i].description) add(`     ${clean(choices[i].description!)}`);
@@ -137,7 +135,7 @@ export async function runAskUserQuestionTUI(
 				invalidate() {},
 			};
 		});
-		// Clear the native form before returning control for ordinary chat.
+		// Clear the native form before returning the selected answers.
 		if (publishTimer) clearTimeout(publishTimer);
 		await lifecycle.close();
 		if (result.cancelled || signal?.aborted) return { answers: [], cancelled: true };

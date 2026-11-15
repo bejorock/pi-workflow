@@ -710,15 +710,20 @@ rules to use `ask`; explicit allowlists are not widened automatically.
 The questionnaire supports **1–4 single-select questions**, descriptions, and Markdown option
 previews. Multiple questions use tabs and require a complete final submission. There are no
 multi-select checkboxes, per-option notes, or partial submissions. **Multiple questions** are supported;
-**multiple selections within one question** are not. A chat handoff is returned as `kind: "chat"`,
-not as a custom-text answer or a preset decision.
-Every question includes **Reply in chat**: selecting it closes the choice form and returns a
-chat-follow-up request to the agent. No extra input dialog opens. The agent should ask you to
-type your preference in ordinary chat and wait for your message, not choose a preset or open
-another questionnaire. A child agent should hand this request back to its supervisor. For human
-gates, this is a blocked result (`requiresChatReply: true`), not approval or a default decision;
-route it back for follow-up rather than continuing as though a choice was made.
-Escape cancels the entire questionnaire without partial answers.
+**multiple selections within one question** are not.
+
+Both `ask` and interactive `human()` gates display **exactly the supplied, non-empty options**
+in the terminal and Moshi. No automatic “Other” or “Reply in chat” row is added. The caller waits
+for submission or cancellation; submitting a choice returns it normally as `kind: "option"` for
+`ask`, or as the human gate's `answer`. There is no special chat status, extra input dialog, or
+hidden continuation. Escape cancels the entire questionnaire without partial answers.
+
+Agents should include an explicit **“None of these”**, **“Other”**, or **“Needs revision”** option
+when the presets may not fit. Such labels are ordinary answers: the agent decides how to follow
+up, and a workflow routes on them like any other choice. Approval gates should use unambiguous
+alternatives such as “Needs revision” and route them away from approval. Use ordinary chat for
+open-ended discussion instead of a question with no options. Headless `human()` defaults keep
+their existing behavior.
 
 When an existing local Moshi daemon is available, displayed terminal forms publish native
 `QuestionAsked` / `QuestionResolved` state with the parent Pi session identity, including child
@@ -729,7 +734,7 @@ discovery. Phone preview payloads are capped at 8 KiB of UTF-8 text per option; 
 remain scrollable with PgUp/PgDn. Markdown preview rendering has been verified on the phone.
 
 Moshi's current Pi adapter rejects multi-select and direct free-text form answers, which is why
-custom preferences use an ordinary-chat follow-up instead. The phone may display multi-select
+open-ended preferences belong in ordinary chat or follow-up after an explicit alternative choice. The phone may display multi-select
 controls even though submission is unsupported: a real phone submission was rejected by the
 daemon with `invalid question answer: pi does not support multi-select questions`. The phone
 showed a generic “terminal question may have changed” message even though the form had not

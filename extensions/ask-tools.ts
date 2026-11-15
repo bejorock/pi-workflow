@@ -18,7 +18,6 @@ import {
 import { ChannelClient } from "./channel.ts";
 import type { RequestBroker } from "./request-broker.ts";
 import { QUESTION_LIMITS } from "./question-limits.ts";
-import { CHAT_REPLY_LABEL, CHAT_REPLY_INSTRUCTION, questionChoices } from "./moshi-questions.ts";
 
 // ── Schemas ──────────────────────────────────────────────────────────────
 
@@ -31,7 +30,7 @@ const TUIOptionSchema = Type.Object({
 const TUIQuestionSchema = Type.Object({
 	question: Type.String({ maxLength: QUESTION_LIMITS.question, description: "Clear question ending with ?, max 240 characters; keep background in previews or documents" }),
 	header: Type.String({ maxLength: QUESTION_LIMITS.header, description: "Short topic label, max 12 characters (e.g. Auth method)" }),
-	options: Type.Optional(Type.Array(TUIOptionSchema, { description: "Options to choose from" })),
+	options: Type.Array(TUIOptionSchema, { minItems: 1, description: "Explicit single-select choices; add an alternative such as 'None of these' when appropriate" }),
 });
 
 const AskUserQuestionParams = Type.Object({
@@ -60,9 +59,8 @@ function formatToolResultText(
 		return "No answers provided.";
 	}
 
-	const needsChat = answers.some((answer) => answer.kind === "chat");
 	return (
-		(needsChat ? "Questionnaire returned; ordinary-chat follow-up required:\n" : "Questions answered successfully:\n") +
+		"Questions answered successfully:\n" +
 		answers
 			.map((ans) => {
 				const q = questions[ans.questionIndex];
@@ -70,8 +68,7 @@ function formatToolResultText(
 				const value = ans.answer ?? "(no answer)";
 				return `- ${header}: ${value}`;
 			})
-			.join("\n") +
-		(needsChat ? `\n\n${CHAT_REPLY_INSTRUCTION}` : "")
+			.join("\n")
 	);
 }
 
@@ -88,7 +85,7 @@ export function createAskUserQuestionTool(broker?: RequestBroker): ToolDefinitio
 		label: "Ask",
 		description:
 			"Ask the user one or more questions. Can specify options (with descriptions and markdown previews), " +
-			"single-select choices, and a built-in 'Reply in chat' choice that returns control so you can ask the user to type their preference in ordinary chat. Do not include that reserved choice yourself; omit options to request an ordinary-chat handoff. All questions must be answered; notes and multi-select are not supported.",
+			"single-select choices. Only supplied choices are displayed; include 'None of these' or 'Needs revision' when useful, and decide how to follow up on that answer. Explicit non-empty options are required. Use ordinary chat for open-ended discussion. All questions must be answered; notes and multi-select are not supported.",
 		parameters: AskUserQuestionParams,
 
 		async execute(_id, params, _signal, _onUpdate, ctx) {
@@ -195,16 +192,10 @@ export function createAskUserQuestionTool(broker?: RequestBroker): ToolDefinitio
 					const q = questions[i];
 					let ans: string | undefined;
 
-					if (q.options && q.options.length > 0) {
-						ans = await ctx.ui.select(
-							`${q.question} (${i + 1}/${questions.length})`,
-							questionChoices(q).map((o) => o.label),
-						);
-					} else {
-						ans = await ctx.ui.input(`${q.question} (${i + 1}/${questions.length})`);
-					}
-
-					const kind = ans === CHAT_REPLY_LABEL ? "chat" : !q.options ? "custom" : "option";
+					ans = await ctx.ui.select(
+						`${q.question} (${i + 1}/${questions.length})`,
+						q.options!.map((o) => o.label),
+					);
 					if (ans === undefined || _signal?.aborted) {
 						return {
 							content: [{ type: "text" as const, text: "User cancelled the question." }],
@@ -214,7 +205,7 @@ export function createAskUserQuestionTool(broker?: RequestBroker): ToolDefinitio
 
 					answers.push({
 						questionIndex: i,
-						kind,
+						kind: "option",
 						answer: ans || null,
 					});
 				}

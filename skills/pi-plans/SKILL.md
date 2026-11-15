@@ -86,11 +86,10 @@ g.node('approve', human('Approve the implementation plan?', {
 ```
 
 For an in-flight question, use a short topic header and concise options, and put any lengthy comparison
-in an option's `preview`. Use 1–4 single-select questions, not multi-select. The built-in
-**Reply in chat** choice requests follow-up; it is not plan approval and collects no custom text.
-Ask the user to explain in ordinary chat and wait, rather than opening another form. Human gates
-return `status: "blocked"` and `requiresChatReply: true`; route that result for follow-up instead
-of treating it as approval or the default. See `pi-workflow` → **Human-facing text limits** and
+in an option's `preview`. Use 1–4 single-select questions with explicit non-empty options, not
+multi-select. No automatic alternative is added. Include **Needs revision** or **None of these**
+when useful; it returns as a normal selection. Decide how to follow up in ordinary chat, or route
+the human gate's answer to revision rather than approval. No special chat continuation is created. See `pi-workflow` → **Human-facing text limits** and
 **Interactive Gates vs. In-Flight Tools** for the full rules.
 
 ## /plans Command

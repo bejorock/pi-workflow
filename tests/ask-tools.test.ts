@@ -98,18 +98,20 @@ describe("Ask Tools in Parent Process (direct UI calling)", () => {
 		});
 	});
 
-	it("returns chat follow-up instructions without opening an RPC input", async () => {
+	it("returns explicit alternatives normally without adding choices or opening an RPC input", async () => {
 		const input = vi.fn();
+		const select = vi.fn().mockResolvedValue("None of these");
 		const tool = createAskUserQuestionTool();
 		const result: any = await tool.execute("chat-rpc", {
-			questions: [{question: "Pick?", header: "Pick", options: [{label: "A"}]}],
+			questions: [{question: "Pick?", header: "Pick", options: [{label: "A"}, {label: "None of these"}]}],
 		} as never, undefined, undefined, {
-			mode: "rpc", hasUI: true, ui: {select: vi.fn().mockResolvedValue("Reply in chat"), input},
+			mode: "rpc", hasUI: true, ui: {select, input},
 		} as unknown as ExtensionToolContext);
 		expect(input).not.toHaveBeenCalled();
-		expect(result.details.answers).toEqual([{questionIndex: 0, kind: "chat", answer: "Reply in chat"}]);
-		expect(result.content[0].text).toContain("Ask the user to type their preferred answer in ordinary chat");
-		expect(result.content[0].text).toContain("Do not open another questionnaire or input dialog");
+		expect(select).toHaveBeenCalledWith("Pick? (1/1)", ["A", "None of these"]);
+		expect(result.details.answers).toEqual([{questionIndex: 0, kind: "option", answer: "None of these"}]);
+		expect(result.content[0].text).toContain("Pick: None of these");
+		expect(result.content[0].text).not.toContain("follow-up required");
 	});
 
 	it("ask validation failure", async () => {

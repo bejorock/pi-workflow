@@ -29,8 +29,8 @@ describe("ask validator", () => {
 
 	it("returns duplicate_question for identical question strings", () => {
 		const list: TUIQuestion[] = [
-			{ question: "Repeat", header: "H1" },
-			{ question: "repeat", header: "H2" },
+			{ question: "Repeat", header: "H1", options: [{label: "A"}] },
+			{ question: "repeat", header: "H2", options: [{label: "A"}] },
 		];
 		expect(validateQuestions(list)).toBe("duplicate_question");
 	});
@@ -46,7 +46,7 @@ describe("ask validator", () => {
 		expect(validateQuestions(list)).toBe("duplicate_option_label");
 	});
 
-	it("returns reserved_label when option labels match reserved words", () => {
+	it("accepts agent-provided Other options without reserved labels", () => {
 		const list: TUIQuestion[] = [
 			{
 				question: "Q1",
@@ -54,7 +54,7 @@ describe("ask validator", () => {
 				options: [{ label: "Other" }],
 			},
 		];
-		expect(validateQuestions(list)).toBe("reserved_label");
+		expect(validateQuestions(list)).toBeUndefined();
 	});
 
 	it("returns empty_options if options list is present but empty", () => {
@@ -66,6 +66,10 @@ describe("ask validator", () => {
 			},
 		];
 		expect(validateQuestions(list)).toBe("empty_options");
+	});
+
+	it("requires explicit non-empty options", () => {
+		expect(validateQuestions([{question: "Q?", header: "Q"}])).toBe("empty_options");
 	});
 
 	it("returns undefined for valid questions config", () => {

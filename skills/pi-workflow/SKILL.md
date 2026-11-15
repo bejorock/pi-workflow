@@ -92,7 +92,7 @@ g.run({ target: args.target });", args={ target: "auth module" })
 - `g.run(initialState)` — start it
 
 **`human()` prompt interpolation:** inside a `human()` prompt string, use `#{nodeId}` to embed a
-node's result text — e.g. `human('Review this:\n#{researcher}', { default: 'approve' })`. This is
+node's result text — e.g. `human('Review this:\n#{researcher}', { options: ['approve', 'revise'], default: 'revise' })`. This is
 different from the `${s.nodeId}` syntax used in `agent()` prompt functions — `${}` is a JS
 template literal evaluated at script-load time; `#{}` is resolved by the runtime when the human
 node actually executes.
@@ -297,8 +297,8 @@ Workflows support two distinct ways to bring external judgment or decisions into
    - **Tool access:** An omitted agent `tools` field uses normal defaults. An explicit list is authoritative, including these question tools, `plan`, `contract`, and `node_state`; add each needed name. `tools: []` grants no tools. Permission rules do not grant omitted tools. Both direct subagents and workflow agents follow this policy. Lazy skills require an explicit `read` grant. Only `structured_output` is added implicitly when a node requests `outputSchema`.
    - **Purpose:** Prompting for details *while an agent is executing* inside its node.
    - **`ask`**: The only user-question tool name (no legacy alias). Ask 1–4 single-select questions, with optional descriptions and Markdown previews. Multiple questions work; selecting several options within one question does not. All questions must be answered before submission. Do not request multi-select, notes, or partial answers. Escape cancels the entire questionnaire.
-   - **Reply in chat:** This built-in choice closes the form and returns `kind: "chat"`; no extra input dialog opens and no custom text has been collected yet. Ask the user to type their preference in ordinary chat, then wait for their message. Do not open another questionnaire or assume approval. Child agents must hand this request back to the supervisor. Do not add the reserved label yourself.
-   - **Human gates:** A chat handoff returns `status: "blocked"` and `requiresChatReply: true` with no decision. Route it for follow-up rather than treating it as approval or falling back to the default.
+   - **Explicit alternatives:** Supply non-empty options; no automatic Other/Reply in chat choice is added. Include “None of these”, “Other”, or “Needs revision” when the presets may not fit. Every supplied choice returns normally as `kind: "option"`; decide how to follow up. Open-ended discussion belongs in ordinary chat. There is no extra input dialog or special chat continuation.
+   - **Human gates:** Use explicit options and route the selected `answer` like any other choice. The gate waits for submission/cancellation before routing. Prefer “Needs revision” for approval gates and route it away from approval; it does not create a special blocked/chat result. Headless default behavior is unchanged.
    - **Moshi:** Native publication is optional and uses the parent session for displayed child requests. Markdown previews work on the phone. The current Pi adapter rejects multi-select submissions even if the phone displays checkboxes; do not infer support from visible controls or retry unchanged forms after the generic submission error.
    - **`ask_supervisor`**: Child agents call this to ask the main agent (the supervisor) for instructions or to report progress.
    - **Restrictions:** Agents MUST NOT use these tools to debug errors or ask for code implementations. Errors and missing capabilities must be escalated via the escalation protocol (`STATUS: blocked`).
@@ -819,7 +819,7 @@ g.node('architect', agent('architect', (s) => `Design the contract for: ${args.t
 g.node('red',       agent('red',       (s) => `Write failing tests for this contract:\n${s.architect}`));
 g.node('green',     agent('green',     (s) => `Make these tests pass:\n${s.red}\nContract:\n${s.architect}`));
 g.node('reviewer',  agent('reviewer',  (s) => `Review implementation:\n${s.green}`));
-g.node('ask',       human('Green is blocked. What should we do?', { default: 'retry' }));
+g.node('ask',       human('Green is blocked. What should we do?', { options: ['retry', 'stop'], default: 'stop' }));
 
 g.edge('architect', 'red');
 g.edge('red', 'green');

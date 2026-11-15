@@ -636,19 +636,27 @@ describe("createNodeRunner: interactive nodes", () => {
 		expect(`Chosen mode: "${outcome.result}"`).toBe('Chosen mode: "fast"');
 	});
 
-	it("does not treat Reply in chat as a human decision or use an approval default", async () => {
+	it("fails clearly before queuing an interactive human gate without options", async () => {
+		const broker = new RequestBroker({coalesceMs: 0});
+		const runner = createNodeRunner({cwd, runId: "r1", spawnAgent: vi.fn() as never, broker});
+		const outcome = await runner({id: "gate", def: human("Pick?", {default: "no"})}, {}, {step: 1, runId: "r1"});
+		expect(outcome.technicalFailure).toBe(true);
+		expect(outcome.error).toContain("requires explicit non-empty options");
+	});
+
+	it("returns an explicit alternative normally instead of using the default or chat handling", async () => {
 		const broker = new RequestBroker({coalesceMs: 0});
 		const runner = createNodeRunner({cwd, runId: "r1", spawnAgent: vi.fn() as never, broker});
 		broker.onBatch(batch => broker.resolve(batch[0].id, {
-			source: "human", text: "Reply in chat",
-			answers: {questions: [{questionIndex: 0, kind: "chat", answer: "Reply in chat"}], cancelled: false},
+			source: "human", text: "Needs revision",
+			answers: {questions: [{questionIndex: 0, kind: "option", answer: "Needs revision"}], cancelled: false},
 		}));
-		const pending = runner({id: "gate", def: human("Approve?", {options: ["yes", "no"], default: "yes"})}, {}, {step: 1, runId: "r1"});
+		const pending = runner({id: "gate", def: human("Approve?", {options: ["yes", "Needs revision"], default: "yes"})}, {}, {step: 1, runId: "r1"});
 		broker.tick();
 		const outcome = await pending;
-		expect(outcome.result).toMatchObject({status: "blocked", requiresChatReply: true, blockedOn: "human"});
-		expect((outcome.result as any).answer).toBeUndefined();
-		expect(`${outcome.result}`).toContain("Ask the user to type their preferred answer in ordinary chat");
+		expect(outcome.result).toMatchObject({status: "ok", answer: "Needs revision"});
+		expect((outcome.result as any).requiresChatReply).toBeUndefined();
+		expect(`${outcome.result}`).toBe("Needs revision");
 	});
 
 	it("a headless human node's default-fallback result also interpolates to its answer", async () => {
