@@ -727,13 +727,18 @@ export function createNodeRunner(options: CreateNodeRunnerOptions): NodeRunner {
 		// never a failure.
 		if (single.exitCode !== 0 || single.error || single.errorMessage) {
 			const classification = classifySingleResultFailure(single);
+			const schemaOnlyFailure = single.structuredOutputFailed && single.exitCode === 0
+				&& single.error === single.structuredOutputError && !single.errorMessage
+				&& !single.timedOut && !single.turnBudgetExceeded && !single.interrupted
+				&& !single.protocolError && single.stopReason !== "aborted";
+			const completionDiagnostic = single.structuredOutputError ? {structuredOutputError: single.structuredOutputError} : {};
 
 			if (classification.class === "technical") {
 				// Infrastructure failed. There is no agent judgement to route on.
 				// Drain the buffer for cleanup even though the graph aborts.
 				options.nodeStateBuffers?.drain(node.id);
 				return {
-					result: { status: "failed", agent: agentName, text, error: classification.reason, diagnostics: single.diagnostics, artifacts: single.artifactPaths, outputArtifact, sessionId },
+					result: { status: "failed", agent: agentName, text, error: classification.reason, ...completionDiagnostic, diagnostics: single.diagnostics, artifacts: single.artifactPaths, outputArtifact, sessionId },
 					technicalFailure: true,
 					error: classification.reason,
 					tokens,
@@ -748,8 +753,9 @@ export function createNodeRunner(options: CreateNodeRunnerOptions): NodeRunner {
 			parsed.data = options.nodeStateBuffers?.drain(node.id) ?? {};
 			return {
 				result: { ...parsed, status: parsed.status === "ok" ? "blocked" : parsed.status, error: classification.reason, usage: tokens ? { tokens } : undefined, diagnostics: single.diagnostics, artifacts: single.artifactPaths, outputArtifact,
-					...(contract.outputSchema && single.structuredOutputFailed ? {contractError: classification.reason, completionSchema: contract.outputSchema} : {}) },
-				error: contract.outputSchema && single.structuredOutputFailed ? undefined : classification.reason,
+					...completionDiagnostic,
+					...(contract.outputSchema && schemaOnlyFailure ? {contractError: single.structuredOutputError, completionSchema: contract.outputSchema} : {}) },
+				error: contract.outputSchema && schemaOnlyFailure ? undefined : classification.reason,
 				tokens,
 				...accounting,
 				sessionId,

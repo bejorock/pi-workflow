@@ -91,6 +91,18 @@ describe("BudgetTracker", () => {
 		expect(budget.record(1)).toBeNull();
 	});
 
+	it("describes advisory and checkpoint policies without promising interruption or a pause after END", () => {
+		const advisory = new BudgetTracker(100).record(120)!;
+		expect(advisory.message).toContain("advisory (no checkpoint policy enabled)");
+		const checkpoint = new BudgetTracker(100, {onLimit: "pause_before_next_node"});
+		expect(checkpoint.record(80)?.level).toBe("warning");
+		const warning = checkpoint.record(40)!;
+		expect(warning.message).toContain("active work finishes");
+		expect(warning.message).toContain("before the next wave if work remains");
+		expect(warning.message).not.toContain("not enforced");
+		expect(checkpoint.record(10)).toBeNull();
+	});
+
 	it("keeps tracking past the limit rather than enforcing it", () => {
 		// Budgets are a signal, not a kill switch: aborting at 100% would
 		// abandon work already paid for.

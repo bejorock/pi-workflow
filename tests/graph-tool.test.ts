@@ -343,6 +343,16 @@ g.run();
 			expect(result.text).toContain("completed");
 		});
 
+		it("reports checkpoint policy instead of claiming budgets are unenforced", async () => {
+			const spawn = vi.fn().mockResolvedValue({...reply("done"), usage: {totalTokens: 1200}});
+			const result = await run(LINEAR, {args: {task: "t"}, tokenBudget: 1000,
+				budgetPolicy: {onLimit: "pause_before_next_node"}}, spawn);
+			expect(result.text).toContain("paused");
+			expect(result.text).toContain("Checkpoint policy is enabled");
+			expect(result.text).not.toContain("not enforced");
+			expect(spawn).toHaveBeenCalledTimes(1);
+		});
+
 		it("stays quiet when within budget", async () => {
 			const spawn = vi.fn().mockResolvedValue(reply("done"));
 			const result = await run(LINEAR, { args: { task: "t" }, tokenBudget: 100000 }, spawn);

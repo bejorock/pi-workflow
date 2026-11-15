@@ -392,6 +392,8 @@ export interface SingleResult {
 	outputSaveError?: string;
 	structuredOutput?: unknown;
 	structuredOutputFailed?: boolean;
+	/** Completion-contract diagnostic; never replaces an existing execution failure. */
+	structuredOutputError?: string;
 	diagnostics?: ExecutionDiagnostics;
 	structuredOutputPath?: string;
 	structuredOutputSchemaPath?: string;

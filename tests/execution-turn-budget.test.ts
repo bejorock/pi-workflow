@@ -152,6 +152,43 @@ describe("turn-budget parent-side backstop (execution.ts)", () => {
 		expect(result.diagnostics).toMatchObject({phase: "provider", failureKind: "process", changeEvidence: "unknown"});
 	});
 
+	it.each(["generation", "cancelled", "provider", "process", "schema-only"])("preserves %s failure precedence when structured completion is missing", async (kind) => {
+		const binary = path.join(tempDir, "missing-structured.cjs");
+		const body = kind === "generation" || kind === "cancelled"
+			? `console.log(JSON.stringify({type:"message_start",message:{role:"assistant",content:[]}})); setInterval(() => {}, 1000);`
+			: kind === "provider"
+				? `console.log(JSON.stringify({type:"error",error:"HTTP 401 unauthorized"})); process.exit(1);`
+				: kind === "process" ? `console.error("Node required tools unavailable before provider request: missing"); process.exit(1);` : "process.exit(0);";
+		fs.writeFileSync(binary, `#!${process.execPath}\n${body}`, {mode: 0o755});
+		process.env[PI_SUBAGENT_PI_BINARY_ENV] = binary;
+		process.env.PI_WORKFLOW_GENERATION_TIMEOUT_MS = "300";
+		const controller = new AbortController();
+		const cancel = kind === "cancelled" ? setTimeout(() => controller.abort(), 100) : undefined;
+		const result = await runSingleAgent(tempDir, makeAgent(), "complete", {
+			runId: `missing-${kind}`,
+			signal: controller.signal,
+			structuredOutput: {schema: {type: "object"}, schemaPath: path.join(tempDir, "schema.json"), outputPath: path.join(tempDir, "result.json")},
+		});
+		if (cancel) clearTimeout(cancel);
+		expect(result.structuredOutputFailed).toBe(true);
+		expect(result.structuredOutputError).toContain("Missing structured_output call");
+		if (kind === "generation") {
+			expect(result.error).toContain("Model generation exceeded 300ms");
+			expect(result.diagnostics?.failureKind).toBe("timeout");
+			expect(classifySingleResultFailure(result)).toMatchObject({class: "agent", code: "timed-out"});
+		} else if (kind === "cancelled") {
+			expect(result.error).not.toBe(result.structuredOutputError);
+			expect(classifySingleResultFailure(result)).toMatchObject({class: "technical", code: "aborted"});
+		} else if (kind === "provider") {
+			expect(classifySingleResultFailure(result)).toMatchObject({class: "technical", code: "provider-error", reason: "HTTP 401 unauthorized"});
+		} else if (kind === "process") {
+			expect(classifySingleResultFailure(result)).toMatchObject({class: "technical", code: "required-tools-unavailable"});
+		} else {
+			expect(result.error).toBe(result.structuredOutputError);
+			expect(classifySingleResultFailure(result)).toMatchObject({class: "agent", code: "agent-error"});
+		}
+	}, 15000);
+
 	it("applies DEFAULT_TURN_BUDGET (maxTurns: 50) when neither the call site nor agent frontmatter set one", async () => {
 		const scriptPath = writeHealthyPiBinary(tempDir, 3); // well under the default of 50
 		process.env[PI_SUBAGENT_PI_BINARY_ENV] = scriptPath;

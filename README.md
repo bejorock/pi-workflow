@@ -1085,8 +1085,9 @@ a run that never happened.
 `transcript.jsonl`, `events.jsonl`, `metadata.json`), inside the project rather than in
 `~/.pi/agent/sessions`.
 
-**Budgets are tracked, not enforced.** Aborting at 100% abandons work already paid for; the useful
-signal is "this cost more than expected".
+**Token budgets are advisory by default.** With `budgetPolicy.onLimit: "pause_before_next_node"`,
+active work finishes and execution pauses before the next wave if work remains. Neither mode
+interrupts an active wave; the warning and final report describe the selected policy.
 
 **Headless runs never hang.** A `human()` node with a `default` answers with it and records that it
 did; without one it is marked `skipped` — never `approved`. Silence is not consent.

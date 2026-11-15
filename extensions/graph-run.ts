@@ -215,6 +215,7 @@ export async function executeGraphRun(options: GraphRunOptions): Promise<GraphRu
 			cwd: options.cwd,
 			runId,
 			tokenBudget: options.tokenBudget,
+			budgetPolicy: options.budgetPolicy,
 			useWorktree: options.useWorktree,
 			extraEnv: channelEnv,
 		});

@@ -8,6 +8,7 @@
  */
 
 import * as path from "node:path";
+import type { BudgetPolicy } from "./graph-run.ts";
 import type { ArtifactConfig } from "./types.ts";
 import type { NodeExecution } from "./graph-executor.ts";
 import { NodeStateBuffers } from "./node-state-reducer.ts";
@@ -38,10 +39,9 @@ export interface BudgetWarning {
 /**
  * Tracks token spend across a graph run.
  *
- * Tracking only — never enforcement. Killing a run at 100% would abandon
- * work already paid for, and the useful signal is almost always "this cost
- * more than expected", not "stop immediately". The 80% warning fires once,
- * so a long run does not spam the operator.
+ * Tracking only; the executor owns optional pause-before-next-wave enforcement.
+ * Active work is never interrupted. Warnings describe the configured policy
+ * and fire once per threshold so a long run does not spam the operator.
  */
 export class BudgetTracker {
 	readonly total: number | null;
@@ -49,7 +49,7 @@ export class BudgetTracker {
 	private warnedAt80 = false;
 	private warnedAtLimit = false;
 
-	constructor(total?: number | null) {
+	constructor(total?: number | null, private readonly policy?: BudgetPolicy) {
 		this.total = total != null && total > 0 ? total : null;
 	}
 
@@ -67,7 +67,9 @@ export class BudgetTracker {
 			this.warnedAt80 = true;
 			return {
 				level: "exceeded",
-				message: `Token budget exceeded: ${this.spentTokens}/${this.total} tokens used. The run continues; budgets are tracked, not enforced.`,
+				message: `Token budget exceeded: ${this.spentTokens}/${this.total} tokens used. ${this.policy?.onLimit === "pause_before_next_node"
+					? "Checkpoint policy is enabled: active work finishes, then execution pauses before the next wave if work remains."
+					: "The run continues; this token budget is advisory (no checkpoint policy enabled)."}`,
 				spent: this.spentTokens,
 				total: this.total,
 			};
@@ -207,6 +209,7 @@ export interface GraphRunContextOptions {
 	cwd: string;
 	runId: string;
 	tokenBudget?: number | null;
+	budgetPolicy?: BudgetPolicy;
 	artifacts?: ArtifactOptions;
 	useWorktree?: boolean;
 	onWarning?: (warning: BudgetWarning) => void;
@@ -242,7 +245,7 @@ export class GraphRunContext {
 	constructor(options: GraphRunContextOptions) {
 		this.runId = options.runId;
 		this.projectCwd = options.cwd;
-		this.budget = new BudgetTracker(options.tokenBudget);
+		this.budget = new BudgetTracker(options.tokenBudget, options.budgetPolicy);
 		this.artifactConfig = buildArtifactConfig(options.artifacts);
 		// Artifacts stay with the project even when agents run in a worktree,
 		// so a run's history survives worktree cleanup.

@@ -743,12 +743,21 @@ async function runSingleAttempt(
 		result.exitCode = 130;
 	}
 
+	// Preserve execution failures before checking the completion contract. A
+	// missing capture after timeout/provider/process failure is a consequence,
+	// not the primary cause (and must not become correctable metadata).
+	if (result.exitCode !== 0 && !result.error && !result.errorMessage) {
+		const stderr = stderrReader.text().trim();
+		if (stderr) result.error = stderr;
+	}
+	const executionFailed = result.exitCode !== 0 || Boolean(result.error || result.errorMessage || result.protocolError || result.timedOut || result.interrupted);
 	// Parse structured output
 	if (options.structuredOutput) {
 		const structured = await readStructuredOutput(options.structuredOutput);
 		if (structured.error) {
 			result.structuredOutputFailed = true;
-			result.error = structured.error;
+			result.structuredOutputError = structured.error;
+			if (!executionFailed) result.error = structured.error;
 		} else {
 			result.structuredOutput = structured.value;
 		}
@@ -819,10 +828,6 @@ async function runSingleAttempt(
 		}
 	}
 
-	if (result.exitCode !== 0 && !result.error && !result.errorMessage) {
-		const stderr = stderrReader.text().trim();
-		if (stderr) result.error = stderr;
-	}
 	if (result.diagnostics && (result.exitCode !== 0 || result.error || result.errorMessage)) {
 		result.diagnostics.failureKind = generationExpired || result.timedOut ? "timeout" : options.signal?.aborted ? "cancelled" : result.protocolError ? "protocol" : result.errorMessage ? "provider" : "process";
 		result.diagnostics.resumeAdvice = "Inspect partial output, changed files and dependency hashes before explicit resume. No writes were retried automatically.";

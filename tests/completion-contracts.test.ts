@@ -20,6 +20,25 @@ it("folds validated structured data and marks invalid capture blocked without re
   const failure=await run(node({outputSchema:schema}),{}, {step:3,runId:"test"});expect(failure.technicalFailure).toBe(true);
  }finally{fs.rmSync(cwd,{recursive:true,force:true});}
 });
+it.each(["timeout", "provider", "schema-only"])("does not expose %s as correctable execution metadata", async(kind)=>{
+ const cwd=fs.mkdtempSync(path.join(os.tmpdir(),"completion-"));try{
+  const missing="Missing structured_output call";
+  const spawn=vi.fn().mockResolvedValue({exitCode:kind==="schema-only"?0:1,messages:[],structuredOutputFailed:true,structuredOutputError:missing,
+   ...(kind==="timeout"?{timedOut:true,error:"Model generation exceeded 300000ms without completing an assistant message."}:kind==="provider"?{errorMessage:"HTTP 401 unauthorized"}:{error:missing})});
+  const run=createNodeRunner({cwd,runId:"test",spawnAgent:spawn as never});
+  const result=await run(node({outputSchema:schema}),{}, {step:1,runId:"test"});
+  expect(result.result).toMatchObject({structuredOutputError:missing});
+  if(kind==="schema-only"){
+   expect(result.result).toMatchObject({status:"blocked",contractError:missing,completionSchema:schema});
+   expect(result.error).toBeUndefined();
+  }else{
+   expect(result.result).not.toHaveProperty("contractError");
+   expect(result.result).not.toHaveProperty("completionSchema");
+   expect(result.error).toContain(kind==="timeout"?"Model generation exceeded":"HTTP 401");
+   expect(Boolean(result.technicalFailure)).toBe(kind==="provider");
+  }
+ }finally{fs.rmSync(cwd,{recursive:true,force:true});}
+});
 it("bounds final message handoff and keeps full output in an artifact",async()=>{
  const cwd=fs.mkdtempSync(path.join(os.tmpdir(),"completion-"));try{
   const text="original ".repeat(1000);const spawn=vi.fn().mockResolvedValue({exitCode:0,messages:[{role:"assistant",content:[{type:"text",text}]}]});
