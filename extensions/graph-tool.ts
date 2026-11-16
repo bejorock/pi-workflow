@@ -12,6 +12,7 @@ import { checkNodeContract } from "./node-contracts.ts";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { WorkflowController } from "./workflow-controller.ts";
+import { withRunCard } from "./run-card.ts";
 import { WorkflowManager as ControllerManager } from "./workflow-manager.ts";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -188,7 +189,7 @@ export function createGraphWorkflowTool(options: GraphToolOptions = {}): ToolDef
 	const manager = options.workflowManager ?? new ControllerManager();
 	const controller = options.controller ?? new WorkflowController(manager, options.broker);
 
-	return defineTool({
+	return withRunCard(defineTool({
 		name: "workflow",
 		label: "Workflow",
 		description: [
@@ -214,7 +215,7 @@ export function createGraphWorkflowTool(options: GraphToolOptions = {}): ToolDef
 		],
 		parameters: GraphToolParams,
 
-		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			const cwd = options.cwd ?? ctx.cwd;
 
 			// args is the only unstructured parameter (Type.Any), and a model
@@ -436,6 +437,7 @@ export function createGraphWorkflowTool(options: GraphToolOptions = {}): ToolDef
 					display?.nodeStarted({step: execution.step, nodeId: execution.nodeId, nodeType: execution.nodeType, agentName: execution.agentName, round: execution.round});
 					display?.nodeCompleted(execution);
 				}
+				onUpdate?.({content: [{type: "text", text: `Starting ${meta.name}`}], details: {runId}});
 				options.onRunStart?.({ runId, name: meta.name, nodeIds });
 			} catch (error) {
 				runAbort.abort();
@@ -565,5 +567,5 @@ export function createGraphWorkflowTool(options: GraphToolOptions = {}): ToolDef
 				},
 			};
 		},
-	});
+	}), manager, options.broker);
 }

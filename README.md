@@ -1058,8 +1058,18 @@ These caps do not apply to previews, user-written answers, or `ask_supervisor` c
 ● reviewer (reviewer)    → END        Approved
 ```
 
-Run progress appears in foreground tool updates and `/runs`, not a persistent bottom widget.
-Completion/failure toasts, optional relay notifications, supervisor reminders, and human dialogs remain.
+Run progress appears in shared live chat cards for `subagent`, `workflow`, `subagent_wait`, and
+`workflow_wait`, plus `/runs`—not a persistent bottom widget. Cards refresh at most four times per
+second on progress callbacks, with a one-second elapsed-time heartbeat during quiet work. They show
+observed execution rows, current tool/file activity, elapsed time, and explicit human/supervisor waiting
+or stopping states. They do not invent percentages, ETAs, future branches, or success before results.
+Expand a tool card using Pi's normal tool expansion control for more rows, recent tool events, last
+activity, run identity, and the full final report. Compact final cards retain the outcome; supervisor
+questions remain visible without expanding. `workflow_wait` reattaches to the same run, not a new one.
+Live activity previews omit prompts, raw tool arguments, arbitrary output, and reasoning. Original
+model-facing results and detailed `/runs` inspection remain available; these cards are not interactive
+buttons or a transcript viewer. Completion/failure toasts, optional relay notifications, supervisor
+reminders, and human dialogs remain.
 The separate `/wf` execution-mode indicator is unchanged.
 
 ### Run types and history cleanup

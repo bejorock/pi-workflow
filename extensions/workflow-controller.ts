@@ -4,6 +4,7 @@ import { Type } from "typebox";
 import type { RequestBroker, PendingRequest } from "./request-broker.ts";
 import type { WorkflowManager } from "./workflow-manager.ts";
 import type { DeliverableRun } from "./result-delivery.ts";
+import { withRunCard } from "./run-card.ts";
 
 interface ControlledRun {
 	runId: string; name: string; abort: AbortController; done?: Promise<unknown>;
@@ -73,7 +74,7 @@ export class WorkflowController {
 					return { status: "stopped", runId: run.runId, runStatus: run.report?.status ?? "aborted", text: run.report?.text ?? `Workflow ${run.runId} stopped by interruption.` };
 				}
 				if (run.completed) {
-					if (run.delivered) return { status: "already_delivered", text: `Workflow ${run.runId} has finished; its report was already delivered. Use workflow_status for inspection.` };
+					if (run.delivered) return { status: "already_delivered", runId: run.runId, text: `Workflow ${run.runId} has finished; its report was already delivered. Use workflow_status for inspection.` };
 					run.delivered = true;
 					return { status: "completed", runId: run.runId, runStatus: run.report!.status, text: run.report!.text };
 				}
@@ -84,7 +85,7 @@ export class WorkflowController {
 						this.broker!.markInlineDelivered(request.id);
 						return `[workflow-agent-question · requestId: ${request.id} · runId: ${run.runId}]\nAgent: ${request.agent ?? request.nodeId ?? "workflow agent"}\nQuestion: ${request.questions.map(q => q.question).join("\n")}`;
 					});
-					return { status: "supervisor", requestIds: pending.map(r => r.id), text: sections.join("\n\n") +
+					return { status: "supervisor", runId: run.runId, requestIds: pending.map(r => r.id), text: sections.join("\n\n") +
 						`\n\nMANDATORY: Answer every request using workflow_reply(requestId, answer), not prose. Then immediately call workflow_wait({ runId: "${run.runId}" }). The workflow remains active and owns the only slot.` };
 				}
 				await new Promise(resolve => setTimeout(resolve, 25));
@@ -97,14 +98,14 @@ export class WorkflowController {
 }
 
 export function createWorkflowWaitTool(controller: WorkflowController) {
-	return defineTool({ name: "workflow_wait", label: "Workflow Wait",
+	return withRunCard(defineTool({ name: "workflow_wait", label: "Workflow Wait",
 		description: "Wait for the active workflow's final report or supervisor questions. Call immediately after workflow_reply. Interrupting this tool stops the workflow.",
 		parameters: Type.Object({ runId: Type.Optional(Type.String({ description: "Workflow identity; defaults to the active workflow." })) }),
 		async execute(_id, params, signal) {
 			const result = await controller.wait(params.runId, signal);
 			return { content: [{ type: "text" as const, text: result.text }], details: { ...result, controllerStatus: result.status, status: result.runStatus ?? result.status, runId: result.runId ?? params.runId ?? controller.activeRunId() } };
 		},
-	});
+	}), controller.manager, controller.broker, params => (params as {runId?: string}).runId ?? controller.activeRunId());
 }
 
 /** Idle-only fallback and bounded per-request reminders. No modal escalation. */

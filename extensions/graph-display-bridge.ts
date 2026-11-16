@@ -146,7 +146,7 @@ export class GraphDisplayBridge {
 	nodeProgress(nodeId: string, progress: import("./types.ts").AgentProgress): void {
 		try {
 			const node = this.manager.getRun(this.runId)?.snapshot.agents.findLast(agent => agent.nodeId === nodeId && agent.status === "running");
-			if (node) this.manager.updateAgentField(this.runId, node.id, "diagnostics", progress.diagnostics);
+			if (node) this.manager.updateAgentProgress(this.runId, node.id, progress);
 		} catch { /* display observers cannot fail execution */ }
 	}
 
@@ -181,6 +181,7 @@ export class GraphDisplayBridge {
 				step: info.step,
 				round: info.round,
 				label,
+				nodeType: info.nodeType,
 				prompt: `${info.nodeType} node "${info.nodeId}"`,
 				status: "running",
 			});

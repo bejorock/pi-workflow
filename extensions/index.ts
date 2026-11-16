@@ -63,11 +63,13 @@ import {
 	contractCreate, contractGet, contractList, contractEdit, contractPropose, contractSupersede,
 } from "./contract-tool.ts";
 import { openContractsNavigator } from "./contract-ui.ts";
+import { withRunCard } from "./run-card.ts";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
 
 interface SubagentDetails {
+	runId?: string;
 	mode: "single" | "parallel";
 	agentScope: AgentScope;
 	results: SingleResult[];
@@ -435,7 +437,8 @@ export default function (pi: ExtensionAPI) {
 	const globalWorkflowManager = new WorkflowManager();
 
 	// --- Subagent Tool ---
-	pi.registerTool({
+	const globalBroker = new RequestBroker();
+	pi.registerTool(withRunCard({
 		name: "subagent",
 		label: "Subagent",
 		description: [
@@ -462,9 +465,11 @@ export default function (pi: ExtensionAPI) {
 			const hasSingle = Boolean(params.agent && params.task);
 			const modeCount = Number(hasTasks) + Number(hasSingle);
 
+			let cardRunId: string | undefined;
 			const makeDetails =
 				(mode: "single" | "parallel") =>
 				(results: SingleResult[]): SubagentDetails => ({
+					runId: cardRunId,
 					mode,
 					agentScope,
 					results,
@@ -521,6 +526,7 @@ export default function (pi: ExtensionAPI) {
 				}
 
 				const runId = `subagent-parallel-${Date.now()}`;
+				cardRunId = runId;
 				const chDir = path.join(ctx.cwd, ".pi-workflow", "channels", runId);
 				ensureChannel(chDir);
 
@@ -584,6 +590,7 @@ export default function (pi: ExtensionAPI) {
 					description: `${params.tasks.length} tasks`,
 					phases: [{ title: "execution" }],
 				}, undefined, { cwd: ctx.cwd, runKind: "parallel" });
+				onUpdate?.({content: [{type: "text", text: "Starting subagents"}], details: makeDetails("parallel")([])});
 
 				const liveResults: Array<{ agent: string; task: string; status: "running" | "done" | "error"; line?: string }> =
 					params.tasks.map((t) => ({ agent: t.agent, task: t.task, status: "running" }));
@@ -601,7 +608,16 @@ export default function (pi: ExtensionAPI) {
 					});
 				};
 
-				let results: SingleResult[];
+				let results: SingleResult[] = [];
+				const detachedTasks = new Set<number>();
+				const detachedResults = new Map<number, SingleResult>();
+				let batchReturned = false;
+				const finishBatch = () => {
+					if (!batchReturned || detachedTasks.size) return;
+					poller.stop();
+					cleanupChannel(chDir);
+					globalWorkflowManager.completeRun(runId, undefined, results.find(r => isFailedResult(r))?.error);
+				};
 				try {
 					results = await mapWithConcurrencyLimit(
 						params.tasks,
@@ -659,12 +675,26 @@ export default function (pi: ExtensionAPI) {
 									maxSubagentDepth: resolveChildMaxSubagentDepth(currentMaxSubagentDepth, agent.maxSubagentDepth),
 									allowIntercomDetach: true,
 									intercomEvents: intercomDetachEmitter,
+									onDetachedExit: (finalResult) => {
+										detachedTasks.delete(taskId);
+										detachedResults.set(_index, finalResult);
+										results[_index] = finalResult;
+										const failed = isFailedResult(finalResult);
+										globalWorkflowManager.markAgentEnd(runId, taskId, failed ? "error" : "done", failed ? undefined : getResultOutput(finalResult), finalResult.error,
+											(finalResult.usage?.input ?? 0) + (finalResult.usage?.output ?? 0), Date.now() - taskStartTime);
+										finishBatch();
+									},
 									onProgress: (progress) => {
+										globalWorkflowManager.updateAgentProgress(runId, taskId, progress);
 										liveResults[_index] = { agent: t.agent, task: t.task, status: "running", line: formatProgressLine(progress) };
 										emitParallelUpdate();
 									},
 								},
 							);
+							if (r.detached) {
+								if (!detachedResults.has(_index)) detachedTasks.add(taskId);
+								return detachedResults.get(_index) ?? r;
+							}
 							liveResults[_index] = {
 								agent: t.agent,
 								task: t.task,
@@ -687,12 +717,18 @@ export default function (pi: ExtensionAPI) {
 						},
 					);
 				} finally {
-					poller.stop();
-					cleanupChannel(chDir);
+					for (const [index, finalResult] of detachedResults) results[index] = finalResult;
+					batchReturned = true;
+					finishBatch();
 				}
 
-				const firstError = results.find((r) => isFailedResult(r))?.error;
-				globalWorkflowManager.completeRun(runId, undefined, firstError);
+				if (detachedTasks.size) {
+					const questions = results.filter(r => r.detached && r.supervisorQuestion).map(r => {
+						if (r.supervisorRequestId) globalBroker.markInlineDelivered(r.supervisorRequestId);
+						return `[workflow-agent-question · agent: "${r.agent}" · requestId: "${r.supervisorRequestId}"]\n${r.supervisorQuestion}`;
+					});
+					return {content: [{type: "text", text: `Parallel subagent run ${runId} awaits supervisor coordination. You MUST answer each request using workflow_reply({requestId, answer}), then subagent_wait({id: "${runId}"}).\n\n${questions.join("\n\n")}`}], details: makeDetails("parallel")(results)};
+				}
 
 				const successCount = results.filter((r) => !isFailedResult(r)).length;
 				const summaries = results.map((r) => {
@@ -726,6 +762,7 @@ export default function (pi: ExtensionAPI) {
 				}
 
 				const runId = `subagent-${Date.now()}`;
+				cardRunId = runId;
 				const chDir = path.join(ctx.cwd, ".pi-workflow", "channels", runId);
 				ensureChannel(chDir);
 
@@ -789,6 +826,7 @@ export default function (pi: ExtensionAPI) {
 					description: params.task,
 					phases: [{ title: "execution" }],
 				}, undefined, { cwd: ctx.cwd, runKind: "subagent" });
+				onUpdate?.({content: [{type: "text", text: "Starting subagent"}], details: makeDetails("single")([])});
 
 				const sessionDir = path.join(ctx.cwd, ".pi-workflow", "sessions", runId);
 				fs.mkdirSync(sessionDir, { recursive: true });
@@ -855,14 +893,13 @@ export default function (pi: ExtensionAPI) {
 									text: `Agent "${agent.name}" completed.\n\nResult: ${getResultOutput(finalResult)}`,
 								});
 							},
-							onProgress: onUpdate
-								? (progress) => {
-										onUpdate({
-											content: [{ type: "text", text: `${agent.name}: ${formatProgressLine(progress)}` }],
-											details: makeDetails("single")([]),
-										});
-									}
-								: undefined,
+							onProgress: (progress) => {
+								globalWorkflowManager.updateAgentProgress(runId, 1, progress);
+								onUpdate?.({
+									content: [{ type: "text", text: `${agent.name}: ${formatProgressLine(progress)}` }],
+									details: makeDetails("single")([]),
+								});
+							},
 						},
 					);
 				} finally {
@@ -935,7 +972,7 @@ export default function (pi: ExtensionAPI) {
 				details: makeDetails("single")([]),
 			};
 		},
-	});
+	}, globalWorkflowManager, globalBroker));
 
 	// --- Workflow Tool ---
 	// Graph-based coordination: nodes are agents, edges decide where each
@@ -945,7 +982,6 @@ export default function (pi: ExtensionAPI) {
 	// ask_supervisor, and (after re-routing) the human() node all pass through
 	// here. The sinks route each request to whoever can answer it: the user's
 	// TUI for human questions, the main agent's conversation for supervisor ones.
-	const globalBroker = new RequestBroker();
 	const workflowController = new WorkflowController(globalWorkflowManager, globalBroker);
 	installBrokerSinks({ pi, broker: globalBroker, controller: workflowController });
 	globalBroker.start();
@@ -1176,7 +1212,7 @@ export default function (pi: ExtensionAPI) {
 	// --- Subagent Wait Tool ---
 	// Lets the main agent optionally wait for a detached subagent to finish,
 	// or check status of background runs.
-	pi.registerTool(defineTool({
+	pi.registerTool(withRunCard(defineTool({
 		name: "subagent_wait",
 		label: "Subagent Wait",
 		promptSnippet: "Wait for or check status of detached background subagents",
@@ -1194,7 +1230,7 @@ export default function (pi: ExtensionAPI) {
 			timeoutMs: Type.Optional(Type.Number({ description: "Maximum time to wait in ms (default: 600000, max: 3600000)" })),
 			status: Type.Optional(Type.Boolean({ description: "If true, just check status without waiting" })),
 		}),
-		async execute(_id, params, _signal, onUpdate) {
+		async execute(_id, params, signal, onUpdate) {
 			const runId: string | undefined = params.id;
 			const maxTimeout = 3600000;
 			const timeoutMs = Math.min(params.timeoutMs ?? 600000, maxTimeout);
@@ -1232,7 +1268,7 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 
-			if (run.status === "completed" || run.status === "error") {
+			if (run.status === "completed" || run.status === "error" || run.status === "stopped") {
 				return {
 					content: [{ type: "text", text: `Subagent run ${runId} has already completed with status: ${run.status}.` }],
 					details: { runId, status: run.status, result: run.snapshot.result },
@@ -1242,9 +1278,24 @@ export default function (pi: ExtensionAPI) {
 			// Wait for the run to complete
 			return new Promise((resolve) => {
 				const startTime = Date.now();
-				const timeout = setTimeout(() => {
+				const cleanup = () => {
+					clearTimeout(timeout);
 					globalWorkflowManager.removeListener("complete", onComplete);
 					globalWorkflowManager.removeListener("error", onError);
+					globalWorkflowManager.removeListener("stopped", onStopped);
+					signal?.removeEventListener("abort", onAbort);
+				};
+				const onAbort = () => {
+					cleanup();
+					resolve({content: [{type: "text", text: `Stopped waiting for ${runId}; the subagent continues in the background.`}], details: {runId, waitingCancelled: true}});
+				};
+				const onStopped = (data: {runId: string}) => {
+					if (data.runId !== runId) return;
+					cleanup();
+					resolve({content: [{type: "text", text: `Subagent run ${runId} stopped.`}], details: {runId, status: "stopped"}});
+				};
+				const timeout = setTimeout(() => {
+					cleanup();
 					onUpdate?.({ content: [{ type: "text", text: `Still waiting... (${Math.round((Date.now() - startTime) / 1000)}s)` }], details: undefined });
 					resolve({
 						content: [{ type: "text", text: `Subagent run ${runId} timed out after ${timeoutMs}ms. It may still be running in the background. Use subagent_wait({ status: true }) to check.` }],
@@ -1254,7 +1305,7 @@ export default function (pi: ExtensionAPI) {
 
 				const onComplete = (data: { runId: string }) => {
 					if (data.runId !== runId) return;
-					clearTimeout(timeout);
+					cleanup();
 					const updated = globalWorkflowManager.getRun(runId);
 					const output = updated?.snapshot.result || "completed";
 					resolve({
@@ -1265,7 +1316,7 @@ export default function (pi: ExtensionAPI) {
 
 				const onError = (data: { runId: string; error?: string }) => {
 					if (data.runId !== runId) return;
-					clearTimeout(timeout);
+					cleanup();
 					resolve({
 						content: [{ type: "text", text: `Subagent run ${runId} failed: ${data.error || "unknown error"}` }],
 						details: { runId, status: "error", error: data.error },
@@ -1274,9 +1325,12 @@ export default function (pi: ExtensionAPI) {
 
 				globalWorkflowManager.on("complete", onComplete);
 				globalWorkflowManager.on("error", onError);
+				globalWorkflowManager.on("stopped", onStopped);
+				signal?.addEventListener("abort", onAbort, {once: true});
+				if (signal?.aborted) onAbort();
 			});
 		},
-	}));
+	}), globalWorkflowManager, globalBroker, params => (params as {id?: string}).id));
 
 	/**
 	 * Injects the live agent roster into the delegation tools' guidelines.

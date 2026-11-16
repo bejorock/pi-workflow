@@ -32,6 +32,10 @@ export type AgentStatus = "queued" | "running" | "done" | "error" | "skipped" | 
  * Per-agent snapshot for display.
  */
 export interface WorkflowAgentSnapshot {
+	/** Sanitized activity projection; never contains reasoning or arbitrary output. */
+	liveProgress?: {phase?: import("./types.ts").ExecutionDiagnostics["phase"]; tool?: string; path?: string; lastActivityAt?: number; tools?: number; tokens?: number};
+	nodeType?: string;
+	startedAt?: number;
 	diagnostics?: import("./types.ts").ExecutionDiagnostics;
 	usage?: import("./graph-execution-types.ts").NodeExecution["usage"];
 	/** Sequential agent ID */

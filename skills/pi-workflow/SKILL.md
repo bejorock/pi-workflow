@@ -43,6 +43,10 @@ subagent(tasks=[{"agent": "scout", "task": "Review auth module"}, {"agent": "sco
 `/runs` is the shared navigator for **Workflow**, **Subagent**, and **Parallel** entries.
 `/workflows` is the separate saved-script library panel, not a run-history alias. `f` filters All / Workflows / Subagents (including parallel runs). Progress stays in
 foreground tools and this panel; completion toasts and supervisor reminders remain, without a bottom widget.
+The run and wait tools share live chat cards with observed activity, elapsed time, and explicit waiting
+states. Users can expand cards for recent tool events and full final reports. A supervisor yield is
+not completion: reply to every request, then reattach with `workflow_wait` using the same run ID.
+Cards never show raw reasoning or substitute progress percentages for actual execution state.
 
 At the run list, `d` deletes selected history and `c` clears the filtered list. Choose history-only (hide,
 no disk reclaimed) or owned files, review the count/estimated bytes, then confirm. Command equivalents:

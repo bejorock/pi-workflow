@@ -18,6 +18,7 @@ vi.mock("../extensions/execution.ts", () => ({
 describe("subagent tool integration", () => {
 	let tempDir: string;
 	let registeredTool: any;
+	let waitTool: any;
 	let globalManagerInstance: WorkflowManager | undefined;
 
 	beforeEach(() => {
@@ -33,6 +34,7 @@ describe("subagent tool integration", () => {
 		// Capture the registered tool
 		const piMock = {
 			registerTool: (tool: any) => {
+				if (tool.name === "subagent_wait") waitTool = tool;
 				if (tool.name === "subagent") {
 					registeredTool = tool;
 				}
@@ -56,9 +58,11 @@ describe("subagent tool integration", () => {
 			this: WorkflowManager,
 			runId,
 			meta,
+			abortController,
+			source,
 		) {
 			globalManagerInstance = this;
-			return origRegisterRun.call(this, runId, meta);
+			return origRegisterRun.call(this, runId, meta, abortController, source);
 		});
 		vi.spyOn(WorkflowManager.prototype, "markAgentStart").mockImplementation(function (
 			this: WorkflowManager,
@@ -103,6 +107,46 @@ describe("subagent tool integration", () => {
 	afterEach(() => {
 		fs.rmSync(tempDir, { recursive: true, force: true });
 		vi.restoreAllMocks();
+		vi.useRealTimers();
+	});
+
+	it.each(["complete", "error", "stopped", "abort", "timeout"])("cleans wait listeners and card heartbeat after %s", async (outcome) => {
+		vi.mocked(runSingleAgent).mockResolvedValue({agent:"stub",task:"test",exitCode:0,messages:[],usage:{input:0,output:0}} as any);
+		const ctx={cwd:tempDir,sessionManager:{getSessionId:()=>"session"}} as unknown as ExtensionContext;
+		await registeredTool.execute("setup",{agent:"stub",task:"test"},undefined,undefined,ctx);
+		const manager=globalManagerInstance!;
+		manager.registerRun("waiting",{name:"wait-test"},undefined,{runKind:"subagent"});
+		const events=["complete","error","stopped"];
+		const before=events.map(e=>manager.listenerCount(e));
+		vi.useFakeTimers();const abort=new AbortController();
+		const promise=waitTool.execute("wait",{id:"waiting",timeoutMs:1000},abort.signal,()=>{},ctx);
+		if(outcome==="abort")abort.abort();
+		else if(outcome==="timeout")await vi.advanceTimersByTimeAsync(1100);
+		else if(outcome==="stopped")manager.stopRun("waiting");
+		else manager.completeRun("waiting","OK",outcome==="error"?"FAIL":undefined);
+		const result=await promise;
+		expect(events.map(e=>manager.listenerCount(e))).toEqual(before);
+		expect(vi.getTimerCount()).toBe(0);
+		if(outcome==="abort"||outcome==="timeout")expect(result.details.runCard.status).toContain("execution continues");
+	});
+
+	it("keeps a detached parallel child active until its final callback", async () => {
+		let detachedExit: ((result: any) => void) | undefined;
+		vi.mocked(runSingleAgent).mockImplementation(async (_cwd,_agent,_task,options) => {
+			detachedExit=options.onDetachedExit;
+			return {agent:"stub",task:"test",exitCode:-2,detached:true,supervisorRequestId:"parallel-question",supervisorQuestion:"Choose a marker",messages:[],usage:{input:0,output:0}} as any;
+		});
+		const ctx={cwd:tempDir,sessionManager:{getSessionId:()=>"session"}} as unknown as ExtensionContext;
+		const result=await registeredTool.execute("parallel",{tasks:[{agent:"stub",task:"test"}]},undefined,()=>{},ctx);
+		const manager=globalManagerInstance!,runId=result.details.runId;
+		expect(manager.getRun(runId)!.status).toBe("running");
+		expect(manager.getRun(runId)!.snapshot.agents[0].status).toBe("running");
+		expect(result.content[0].text).toContain("awaits supervisor");
+		expect(result.content[0].text).toContain("parallel-question");
+		expect(result.content[0].text).toContain("Choose a marker");
+		detachedExit!({agent:"stub",task:"test",exitCode:0,messages:[],usage:{input:1,output:2}});
+		expect(manager.getRun(runId)!.status).toBe("completed");
+		expect(manager.getRun(runId)!.snapshot.agents[0].status).toBe("done");
 	});
 
 	it("registers subagent run in manager and configures filesystem channel", async () => {
@@ -169,6 +213,7 @@ describe("subagent tool integration", () => {
 				toolCount: 1,
 				tokens: 0,
 				durationMs: 5,
+				diagnostics: {phase: "tool", streamBytes: 0, argumentBytes: 0, changeEvidence: "unknown"},
 				currentTool: "bash",
 				currentToolArgs: '{"command":"npm test"}',
 			});
@@ -191,12 +236,12 @@ describe("subagent tool integration", () => {
 		const updates: any[] = [];
 		const onUpdate = (partial: any) => updates.push(partial);
 
-		await registeredTool.execute("call-1", { agent: "stub", task: "do work", cwd: tempDir }, undefined, onUpdate, ctx);
+		const result = await registeredTool.execute("call-1", { agent: "stub", task: "do work", cwd: tempDir }, undefined, onUpdate, ctx);
 
 		expect(updates.length).toBeGreaterThan(0);
-		const text = updates[0].content[0].text as string;
-		expect(text).toContain("stub:");
-		expect(text).toContain("→ bash");
+		expect(updates[0].details.runCard).toMatchObject({kind: "subagent", status: "running"});
+		expect((result.details as any).runCard).toMatchObject({rows: [{activity: "Finished"}]});
+		expect(globalManagerInstance!.getRun((result.details as any).runId)!.snapshot.agents[0].liveProgress).toMatchObject({tool: "bash", phase: "tool"});
 	});
 
 	it("does not throw when no onUpdate is supplied", async () => {

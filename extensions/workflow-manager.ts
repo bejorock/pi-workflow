@@ -153,6 +153,7 @@ export class WorkflowManager extends EventEmitter {
 			agent.phase = run.snapshot.phases[phaseIndex].title;
 		}
 
+		agent.startedAt ??= Date.now();
 		run.snapshot.agents.push(agent);
 		run.snapshot.totalAgents++;
 		if (run.snapshot.phases[phaseIndex]) {
@@ -215,6 +216,12 @@ export class WorkflowManager extends EventEmitter {
 			run.updatedAt = Date.now();
 			this.emit("agentHistory", { runId, agentId, history: agent.history });
 		}
+	}
+
+	updateAgentProgress(runId: string, agentId: number, progress: import("./types.ts").AgentProgress): void {
+		this.updateAgentField(runId, agentId, "diagnostics", progress.diagnostics);
+		this.updateAgentField(runId, agentId, "liveProgress", {phase: progress.diagnostics?.phase,
+			tool: progress.currentTool, path: progress.currentPath, lastActivityAt: progress.lastActivityAt, tools: progress.toolCount, tokens: progress.tokens});
 	}
 
 	/** Update a single field on an agent snapshot (e.g. model from session). */
