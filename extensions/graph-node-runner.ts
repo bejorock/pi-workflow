@@ -174,7 +174,8 @@ export function withEscalationProtocol(agent: AgentConfig): AgentConfig {
  * being coerced into a category the agent did not choose.
  */
 /**
- * Attaches the text-returning toString() to an agent result.
+ * Attaches text conversion to a node result. Empty blocked/failed results
+ * render their status and diagnostic rather than silently disappearing.
  *
  * Non-enumerable so it never lands in JSON.stringify output or the journal,
  * while still making `${state.architect}` interpolate to the agent's text.
@@ -185,8 +186,12 @@ export function withEscalationProtocol(agent: AgentConfig): AgentConfig {
  */
 export function withResultText<T extends { text?: unknown }>(result: T): T {
 	Object.defineProperty(result, "toString", {
-		value: function toString(this: { text?: unknown }) {
-			return typeof this.text === "string" ? this.text : "";
+		value: function toString(this: { text?: unknown; status?: unknown; error?: unknown; contractError?: unknown; reason?: unknown; blockedOn?: unknown }) {
+			const text = typeof this.text === "string" ? this.text : "";
+			if (text.trim() || (this.status !== "blocked" && this.status !== "failed")) return text;
+			const reason = [this.error, this.contractError, this.reason].find(value => typeof value === "string" && value.trim());
+			const target = typeof this.blockedOn === "string" && this.blockedOn.trim() ? ` (blocked on: ${this.blockedOn})` : "";
+			return `[${this.status}]${target}${reason ? ` ${reason}` : ""}`;
 		},
 		enumerable: false,
 		writable: true,
@@ -738,7 +743,7 @@ export function createNodeRunner(options: CreateNodeRunnerOptions): NodeRunner {
 				// Drain the buffer for cleanup even though the graph aborts.
 				options.nodeStateBuffers?.drain(node.id);
 				return {
-					result: { status: "failed", agent: agentName, text, error: classification.reason, ...completionDiagnostic, diagnostics: single.diagnostics, artifacts: single.artifactPaths, outputArtifact, sessionId },
+					result: withResultText({ status: "failed", agent: agentName, text, error: classification.reason, ...completionDiagnostic, diagnostics: single.diagnostics, artifacts: single.artifactPaths, outputArtifact, sessionId }),
 					technicalFailure: true,
 					error: classification.reason,
 					tokens,
@@ -752,9 +757,9 @@ export function createNodeRunner(options: CreateNodeRunnerOptions): NodeRunner {
 			const parsed = parseAgentResult(text, agentName);
 			parsed.data = options.nodeStateBuffers?.drain(node.id) ?? {};
 			return {
-				result: { ...parsed, status: parsed.status === "ok" ? "blocked" : parsed.status, error: classification.reason, usage: tokens ? { tokens } : undefined, diagnostics: single.diagnostics, artifacts: single.artifactPaths, outputArtifact,
+				result: withResultText({ ...parsed, status: parsed.status === "ok" ? "blocked" : parsed.status, error: classification.reason, usage: tokens ? { tokens } : undefined, diagnostics: single.diagnostics, artifacts: single.artifactPaths, outputArtifact,
 					...completionDiagnostic,
-					...(contract.outputSchema && schemaOnlyFailure ? {contractError: single.structuredOutputError, completionSchema: contract.outputSchema} : {}) },
+					...(contract.outputSchema && schemaOnlyFailure ? {contractError: single.structuredOutputError, completionSchema: contract.outputSchema} : {}) }),
 				error: contract.outputSchema && schemaOnlyFailure ? undefined : classification.reason,
 				tokens,
 				...accounting,
@@ -768,7 +773,7 @@ export function createNodeRunner(options: CreateNodeRunnerOptions): NodeRunner {
 		parsed.data = options.nodeStateBuffers?.drain(node.id) ?? {};
 		if (contract.outputSchema) {
 			const validation = await validateStructuredOutputValue(contract.outputSchema, single.structuredOutput);
-			if (validation.status !== "valid") return {result: {...parsed, status: "blocked", contractError: validation.message, completionSchema: contract.outputSchema}, tokens, ...accounting, sessionId};
+			if (validation.status !== "valid") return {result: withResultText({...parsed, status: "blocked", contractError: validation.message, completionSchema: contract.outputSchema}), tokens, ...accounting, sessionId};
 			parsed.data = single.structuredOutput && typeof single.structuredOutput === "object" ? single.structuredOutput as Record<string, unknown> : {value: single.structuredOutput};
 		}
 		return { result: parsed, tokens, ...accounting, sessionId };
