@@ -16,6 +16,7 @@ import { runKindLabel, type RunKind, type WorkflowManager, type PersistedRun, ty
 import { planRunCleanup, executeRunCleanup, cleanupDescription, type CleanupPlan } from "./run-cleanup.ts";
 import type { WorkflowAgentSnapshot, AgentHistoryEntry, WorkflowPhaseSnapshot } from "./workflow-display-types.ts";
 import { saveWorkflowScript } from "./workflow-library.ts";
+import { renderNavigatorPanel } from "./navigator-panel.ts";
 
 export type ViewKind = "runs" | "phases" | "agents" | "detail";
 
@@ -842,9 +843,6 @@ export function openWorkflowNavigator(
 						bold: (s) => theme.bold(s),
 						bg: (color, s) => theme.bg(color as Parameters<Theme["bg"]>[0], s),
 					};
-					const borderColor = (s: string) => _focused ? theme.fg("accent", s) : theme.fg("borderMuted", s);
-					const titleColor = (s: string) => _focused ? theme.fg("dim", theme.bold(s)) : theme.fg("muted", s);
-					const bgColor = (s: string) => theme.bg("customMessageBg", s) ?? s;
 					const innerWidth = Math.max(10, width - BOX_BORDER_OVERHEAD);
 					const terminalRows = tui.terminal?.rows ?? 24;
 					const overlayRows = Math.max(8, Math.floor(terminalRows * 0.92));
@@ -853,17 +851,7 @@ export function openWorkflowNavigator(
 						? [theme.bold("Delete run history"), ...((pending.plan ? cleanupDescription(pending.plan) : "Choose cleanup mode. Active/stopping/waiting runs are excluded.").match(new RegExp(`.{1,${Math.max(10, innerWidth - 2)}}`, "g")) ?? []), "", pending.plan ? "y confirm · any other key cancel" : "h history only · d delete owned files · esc cancel", "Full file cleanup deletes checkpoints and prevents resume."]
 						: renderNavigatorFrame(state, model, innerWidth, themeAdapter, contentRows);
 					if (notice && !pending) raw.push(theme.fg("warning", truncateToWidth(notice, innerWidth)));
-					const title = titleColor(" runs ");
-					const dashes = (n: number) => "\u2500".repeat(Math.max(0, n));
-					const topBorder = borderColor("\u256d\u2500") + title + borderColor(dashes(innerWidth - 5)) + borderColor("\u256e");
-					const botBorder = borderColor(`\u2570${dashes(innerWidth + 2)}\u256f`);
-					const wrapAndBg = (line: string) => {
-						const padded = truncateToWidth(line, innerWidth, "", true);
-						const fullLine = borderColor(BOX_BORDER_LEFT) + padded + borderColor(BOX_BORDER_RIGHT);
-						const trailingPad = width - visibleWidth(fullLine);
-						return bgColor(fullLine + (trailingPad > 0 ? " ".repeat(trailingPad) : ""));
-					};
-					return [bgColor(topBorder), ...raw.map(wrapAndBg), bgColor(botBorder)];
+					return renderNavigatorPanel("runs", raw, width, theme, _focused);
 				},
 
 				handleInput(data: string): void {

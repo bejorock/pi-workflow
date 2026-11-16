@@ -991,12 +991,15 @@ without being forced to read them.
 
 ### Saved workflow library
 
-`/workflows` opens an interactive panel, not a widget. Select a saved script on the left to view
-its description, when-to-use guidance, source (**project / user / bundled**), file path and actual
-syntax-highlighted code. Browsing only reads and parses scripts; it never executes them.
+`/workflows` opens the same themed panel shell as `/runs`, starting with a saved-script list.
+Use ↑/↓ or j/k to select, then Enter/Right/l to open the full-width reader: description,
+when-to-use guidance, source (**project / user / bundled**), file path and syntax-highlighted code.
+Browsing only reads and parses scripts; it never executes them.
 
-Use ↑/↓ to select, Enter/Tab to focus the code, ↑/↓ or PgUp/PgDn to scroll, ←/→ to pan long code
-lines, `r` to refresh, and `q` to close. Narrow terminals switch between list and preview with Tab.
+Navigation matches `/runs`: Escape/Left/h returns to the list (and closes from the list),
+↑/↓ or j/k scrolls, PgUp/PgDn or Ctrl+B/F pages, Home/End or g/G jumps, and `q` closes.
+Long code lines wrap; there is no separate pane focus or horizontal-pan mode.
+Use `r` to refresh.
 Press `d` to request deletion of the selected project/user script, then `y` to confirm (any other key
 cancels). Bundled scripts are read-only. Changed files must be reconfirmed; symlink paths are refused.
 Deleting a saved script does not delete run history, source files outside the library, plans or contracts.

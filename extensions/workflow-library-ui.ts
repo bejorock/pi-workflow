@@ -2,8 +2,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { constants } from "node:fs";
-import { getLanguageFromPath, highlightCode, type ExtensionUIContext } from "@earendil-works/pi-coding-agent";
-import { parseKey, sliceByColumn, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { getLanguageFromPath, highlightCode, type ExtensionUIContext, type Theme } from "@earendil-works/pi-coding-agent";
+import { sliceByColumn, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { keyToAction } from "./workflow-ui.ts";
+import { renderNavigatorPanel } from "./navigator-panel.ts";
 import { BUILTIN_WORKFLOWS_DIR, getUserWorkflowsDir, getWorkflowLibraryDir, listSavedWorkflows, type SavedWorkflowInfo } from "./workflow-library.ts";
 
 const MAX_SCRIPT_BYTES = 2 * 1024 * 1024;
@@ -30,7 +32,6 @@ export class WorkflowLibraryPanel {
 	entries: SavedWorkflowInfo[] = [];
 	cursor = 0;
 	scroll = 0;
-	column = 0;
 	focus: "list" | "code" = "list";
 	notice = "";
 	code: string[] = [];
@@ -45,13 +46,13 @@ export class WorkflowLibraryPanel {
 		catch (error) { this.entries = []; this.notice = String(error); }
 		const index = this.entries.findIndex(e => e.filePath === old);
 		this.cursor = index >= 0 ? index : Math.min(this.cursor, Math.max(0, this.entries.length - 1));
-		this.loadedPath = undefined; this.scroll = 0; this.column = 0; this.pending = undefined;
+		this.loadedPath = undefined; this.scroll = 0; this.pending = undefined;
 	}
 	invalidate(): void { this.dirty = true; }
 	private loadCode(): void {
 		const entry = this.selected;
 		if (!this.dirty && this.loadedPath === entry?.filePath && entry) return;
-		if (this.loadedPath !== entry?.filePath) { this.scroll = 0; this.column = 0; }
+		if (this.loadedPath !== entry?.filePath) this.scroll = 0;
 		this.loadedPath = entry?.filePath; this.dirty = false; this.code = [];
 		if (!entry) return;
 		try {
@@ -81,7 +82,6 @@ export class WorkflowLibraryPanel {
 			}
 			this.pending = undefined; return false;
 		}
-		if (key === "q" || (key === "escape" && this.focus === "list")) return true;
 		if (key === "r") { this.refresh(); return false; }
 		if (key === "d" && this.selected) {
 			try {
@@ -91,68 +91,88 @@ export class WorkflowLibraryPanel {
 			} catch (error) { this.notice = clean(String(error)); }
 			return false;
 		}
-		if (key === "tab") this.focus = this.focus === "list" ? "code" : "list";
-		else if (key === "escape") this.focus = "list";
-		else if (this.focus === "list") {
-			if (key === "down" || key === "j") this.cursor = Math.min(Math.max(0, this.entries.length - 1), this.cursor + 1);
-			if (key === "up" || key === "k") this.cursor = Math.max(0, this.cursor - 1);
-			if (key === "enter" || key === "right") this.focus = "code";
+		// Use the very same decoded navigation actions as /runs, including
+		// terminal protocols, vim keys and control-key paging.
+		const action = keyToAction(key, this.focus === "list" ? "runs" : "detail");
+		if (action.type === "close") return true;
+		if (action.type === "back") {
+			if (this.focus === "list") return true;
+			this.focus = "list"; return false;
+		}
+		if (key === "tab" || key === "\t" || action.type === "drill") {
+			if (this.selected) { this.focus = "code"; this.loadCode(); }
+			return false;
+		}
+		const move = action.type === "move" ? action.delta : action.type === "page" ? action.direction * page : 0;
+		if (this.focus === "list") {
+			if (action.type === "jump") this.cursor = action.edge === "start" ? 0 : Math.max(0, this.entries.length - 1);
+			else this.cursor = Math.max(0, Math.min(Math.max(0, this.entries.length - 1), this.cursor + move));
 		} else {
-			if (key === "down" || key === "j") this.scroll++;
-			if (key === "up" || key === "k") this.scroll = Math.max(0, this.scroll - 1);
-			if (key === "pageDown") this.scroll += page;
-			if (key === "pageUp") this.scroll = Math.max(0, this.scroll - page);
-			if (key === "home") this.scroll = 0;
-			if (key === "end") this.scroll = this.code.length;
-			if (key === "right") this.column += 8;
-			if (key === "left") this.column = Math.max(0, this.column - 8);
+			if (action.type === "jump") this.scroll = action.edge === "start" ? 0 : Number.MAX_SAFE_INTEGER;
+			else this.scroll = Math.max(0, this.scroll + move);
 		}
 		return false;
 	}
-	render(width: number, height: number): string[] {
+	render(width: number, height: number, theme?: Theme): string[] {
 		this.loadCode();
 		const w = Math.max(1, width); const rows = Math.max(1, height);
-		const split = w >= 76;
-		const leftWidth = split ? Math.min(34, Math.floor(w * .32)) : w;
-		const rightWidth = split ? w - leftWidth - 3 : w;
-		const bodyRows = Math.max(1, rows - 4);
-		const start = Math.max(0, this.cursor - Math.floor(bodyRows / 2));
-		const list = Array.from({length: bodyRows}, (_, i) => {
-			const entry = this.entries[start + i];
-			return entry ? `${start + i === this.cursor ? "›" : " "} [${entry.source}] ${oneLine(entry.name)}` : "";
-		});
-		if (!this.entries.length) list[0] = "No saved workflows.";
+		const fit = (s: string) => truncateToWidth(s, w, "", true);
+		const dim = (s: string) => theme ? theme.fg("dim", s) : s;
 		const entry = this.selected;
-		const details = entry ? [oneLine(entry.description), `When: ${oneLine(entry.whenToUse ?? "Not specified")}`, `File: ${oneLine(entry.filePath)}`, `${entry.source} · ${entry.sizeBytes} bytes · ${new Date(entry.savedAt).toISOString()}`, "─".repeat(rightWidth)] : ["Save a script with workflow(saveWorkflow: true)."];
-		const codeRows = Math.max(1, bodyRows - details.length);
-		this.scroll = Math.min(this.scroll, Math.max(0, this.code.length - codeRows));
-		this.column = Math.min(this.column, this.code.reduce((max, line) => Math.max(max, visibleWidth(line) - Math.max(1, rightWidth - 6)), 0));
-		const preview = [...details, ...this.code.slice(this.scroll, this.scroll + codeRows).map((line, i) => `${String(this.scroll + i + 1).padStart(4)}  ${sliceByColumn(line, this.column, Math.max(1, rightWidth - 6))}`)];
-		const fit = (s: string, n: number) => truncateToWidth(s, n, "", true);
-		const content = Array.from({length: bodyRows}, (_, i) => split ? `${fit(list[i], leftWidth)} │ ${fit(preview[i] ?? "", rightWidth)}` : fit(this.focus === "list" ? list[i] : preview[i] ?? "", w));
-		return [fit(`Workflows · ${this.entries.length} saved · focus: ${this.focus}`, w),
-			fit("↑↓ select/scroll · enter/tab preview · ←→ pan code · PgUp/PgDn · r refresh · d delete · q close", w),
-			...content,
-			fit(this.pending ? `Delete ${oneLine(this.pending.entry.name)} (${this.pending.entry.source})? y confirm · any other key cancels` : oneLine(this.notice), w),
-			fit(`Script lines ${this.code.length ? this.scroll + 1 : 0}–${Math.min(this.code.length, this.scroll + codeRows)}/${this.code.length} · preview only; never executed`, w)
-		].slice(0, rows);
+		let content: string[];
+		if (this.focus === "list") {
+			const count = Math.max(1, rows - 4);
+			const start = Math.min(Math.max(0, this.cursor - Math.floor(count / 2)), Math.max(0, this.entries.length - count));
+			content = [`Workflows · ${this.entries.length} saved`, ""];
+			if (!this.entries.length) content.push("No saved workflows.", dim("Save a script with workflow(saveWorkflow: true)."));
+			for (const [i, item] of this.entries.slice(start, start + count).entries()) {
+				const selected = start + i === this.cursor;
+				const text = `${selected ? "❯" : " "} [${item.source}] ${oneLine(item.name)} · ${oneLine(item.description)}`;
+				content.push(selected && theme ? theme.fg("accent", theme.bold(text)) : text);
+			}
+			content.push(dim("↑↓/jk navigate · enter/→/l open · PgUp/PgDn · r refresh · d delete · q close"));
+		} else {
+			const details = entry ? [`Workflow: ${oneLine(entry.name)} · ${entry.source}`, oneLine(entry.description),
+				`When: ${oneLine(entry.whenToUse ?? "Not specified")}`, `File: ${oneLine(entry.filePath)}`,
+				`${entry.sizeBytes} bytes · ${new Date(entry.savedAt).toISOString()} · preview only; never executed`, "─".repeat(w)] : [];
+			const codeRows = Math.max(1, rows - details.length - 3);
+			// Wrap rather than steal Left/Right from the navigator's back/open keys.
+			const codeWidth = Math.max(1, w - 6);
+			const body = this.code.flatMap((line, index) => {
+				const chunks: string[] = [];
+				// sliceByColumn preserves syntax colours across wrapped fragments.
+				for (let col = 0; col < Math.max(1, visibleWidth(line)); col += codeWidth) {
+					chunks.push(`${col === 0 ? String(index + 1).padStart(4) : "    "}  ${sliceByColumn(line, col, codeWidth)}`);
+				}
+				return chunks;
+			});
+			this.scroll = Math.min(this.scroll, Math.max(0, body.length - codeRows));
+			content = [...details, ...body.slice(this.scroll, this.scroll + codeRows),
+				dim(`Code rows ${body.length ? this.scroll + 1 : 0}–${Math.min(body.length, this.scroll + codeRows)}/${body.length}`),
+				dim("↑↓/jk scroll · PgUp/PgDn · Home/End · esc/←/h back · r refresh · d delete · q close")];
+		}
+		content.push(this.pending ? `Delete ${oneLine(this.pending.entry.name)} (${this.pending.entry.source})? y confirm · any other key cancels` : oneLine(this.notice));
+		return content.map(fit).slice(0, rows);
 	}
 }
 
 export function openWorkflowLibrary(cwd: string, ui: ExtensionUIContext): Promise<void> {
 	const panel = new WorkflowLibraryPanel(cwd);
-	return ui.custom<void>((tui, theme, _keys, done) => ({
+	return ui.custom<void>((tui, theme, _keys, done) => {
+		let focused = false;
+		return {
+		get focused() { return focused; },
+		set focused(value: boolean) { focused = value; },
 		invalidate: () => panel.invalidate(),
 		render(width: number) {
 			const inner = Math.max(1, width - 4);
-			const height = Math.max(5, Math.floor(tui.terminal.rows * .9) - 2);
-			return [theme.fg("borderMuted", `╭${"─".repeat(Math.max(0, width - 2))}╮`),
-				...panel.render(inner, height).map(line => `│ ${line} │`),
-				theme.fg("borderMuted", `╰${"─".repeat(Math.max(0, width - 2))}╯`)];
+			const height = Math.max(6, Math.max(8, Math.floor(tui.terminal.rows * .92)) - 2);
+			return renderNavigatorPanel("workflows", panel.render(inner, height, theme), width, theme, focused);
 		},
 		handleInput(data: string) {
-			if (panel.key(parseKey(data) ?? data, Math.max(1, Math.floor(tui.terminal.rows * .9) - 12))) done();
+			if (panel.key(data, Math.max(1, Math.floor(tui.terminal.rows * .92) - 12))) done();
 			else tui.requestRender();
 		},
-	}), {overlay: true, overlayOptions: {anchor: "center", width: "96%", maxHeight: "94%", margin: 1}});
+	};
+	}, {overlay: true, overlayOptions: {anchor: "center", width: "94%", maxHeight: "92%", margin: 1}});
 }

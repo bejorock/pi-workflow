@@ -665,11 +665,13 @@ workflow(loadWorkflow="audit", args={ repo: "..." })               # re-runs the
 
 Before writing a new workflow script from scratch, check whether a matching one was already saved (e.g. via `/workflows` or by trying `loadWorkflow` first) — especially if the user asks to "run that workflow again" or describes a repeatable process. If `loadWorkflow` references an unknown name, the tool error lists the names that do exist. Use `saveWorkflow: true` when the user explicitly asks to save a workflow, or when the task is clearly a repeatable process worth reusing later; don't save one-off exploratory workflows by default.
 
-`/workflows` opens a library panel with project/user/bundled sources, details, and a scrollable,
-syntax-highlighted script preview. Browsing never executes scripts. Enter/Tab focuses code, ↑/↓ scrolls,
-PgUp/PgDn pages, ←/→ pans code, `r` refreshes, and `q` closes. `d` requests deletion of the selected
-project/user script; `y` confirms, any other key cancels. Bundled scripts are read-only. On narrow
-terminals Tab switches between list and preview. There is no `/saved-workflows` command or library widget.
+`/workflows` uses the same themed panel and list→reader navigation as `/runs`.
+Select with ↑/↓ or j/k; Enter/Right/l opens details and the full-width syntax-highlighted script.
+Escape/Left/h returns to the list (or closes from the list). ↑/↓ or j/k scrolls; PgUp/PgDn or
+Ctrl+B/F pages; Home/End or g/G jumps. Long lines wrap. Browsing never executes scripts.
+`r` refreshes, `q` closes, and `d` requests deletion of the selected project/user script;
+`y` confirms, any other key cancels. Bundled scripts are read-only.
+There is no `/saved-workflows` command or library widget.
 
 The user can also save a workflow after the fact from the `/runs` TUI navigator by selecting a run and pressing `s` — no need to have passed `saveWorkflow: true` up front. This only works for runs still live in the current session (the script is kept in memory, not journaled); it won't work for runs restored from a prior session's journal.
 
