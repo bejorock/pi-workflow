@@ -149,7 +149,7 @@ describe("renderNavigatorText", () => {
 
 		const lines = renderNavigatorText(state, model, 80);
 
-		expect(lines.some((l) => l.includes("No runs yet"))).toBe(true);
+		expect(lines.some((l) => l.includes("No matching runs"))).toBe(true);
 	});
 
 	it("renders two-pane phases and agents view", () => {

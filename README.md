@@ -841,7 +841,7 @@ Inspects a run's progress or investigates a failure.
 ### `workflow_stop`
 
 Stops a running workflow graph before it finishes — the same action as pressing `x` in the
-`/workflows` TUI, but callable by an agent. Call with no `runId` to list every workflow currently
+`/runs` TUI, but callable by an agent. Call with no `runId` to list every workflow currently
 running (so you can pick the right one); call with `runId` to stop it. In-flight nodes are
 aborted; results already recorded stay in the run journal, so a stopped run can still be resumed
 later with `resumeRunId`. Only runs tracked live in this process can actually be stopped — a run
@@ -980,7 +980,10 @@ without being forced to read them.
 
 | Command | Purpose |
 |---|---|
-| `/workflows` | Interactive TUI navigator: runs → phases → nodes → detail |
+| `/runs` | Unified run navigator: typed workflows, subagents and parallel delegations; `f` filters, `d` deletes selected, `c` clears the filtered list |
+| `/runs delete <runId> [files]` | Confirm removal of selected history; add `files` to reclaim run-owned disk space |
+| `/runs clear [files]` | Confirm cleanup of eligible settled history in this workspace, including previously hidden runs when `files` is supplied |
+| `/workflows` | Compatibility alias for `/runs` (same cleanup arguments) |
 | `/plans` | Interactive TUI navigator: browse and read plans in `.pi-workflow/plans/` |
 | `/contracts` | Interactive TUI navigator: browse contracts with type/status colour coding |
 | `/wf normal\|plan\|workflow` | Switch execution mode (Normal, Plan, or Workflow) |
@@ -990,7 +993,7 @@ without being forced to read them.
 ### Foreground controller over background execution
 
 Every `workflow()` call now waits for the run's final report **or supervisor attention**. The graph
-executor remains independently scheduled, so widgets, events, and human dialogs work
+executor remains independently scheduled, so events, notifications, and human dialogs work
 while the tool is pending. There is no background-only flag. Only **one active graph workflow** per Pi
 session is permitted, including paused runs and runs awaiting answers; the slot is released after
 execution settles. This does not cap the workflow's internal parallel branches or ordinary subagents.
@@ -1030,7 +1033,7 @@ the full node identity is preserved internally. Dynamic prompts are checked **af
 Use option Markdown previews or `human(..., { artifacts: ['plan', 'contract'] })` for detailed context.
 These caps do not apply to previews, user-written answers, or `ask_supervisor` coordination.
 
-`/workflows` shows the walk with routing inline, so an escalation loop is legible at a glance:
+`/runs` shows the walk with routing inline, so an escalation loop is legible at a glance:
 
 ```
 ● architect (architect)  → green      Contract v1: UserRepo.findById
@@ -1040,11 +1043,30 @@ These caps do not apply to previews, user-written answers, or `ask_supervisor` c
 ● reviewer (reviewer)    → END        Approved
 ```
 
-During a run the status line names the node currently working:
+Run progress appears in foreground tool updates and `/runs`, not a persistent bottom widget.
+Completion/failure toasts, optional relay notifications, supervisor reminders, and human dialogs remain.
+The separate `/wf` execution-mode indicator is unchanged.
 
-```
-▶ tdd_feature: green (green) · step 4 · 12.4kt
-```
+### Run types and history cleanup
+
+The shared panel labels entries **Workflow**, **Subagent**, or **Parallel** using persisted metadata.
+`f` cycles All / Workflows / Subagents (the latter includes parallel delegations). Legacy graph journals
+are recognized by their graph records; insufficient legacy metadata is labelled **Unknown**, never guessed
+from the run ID. Direct subagent summaries now survive restart too; old untracked subagent files are not
+retroactively indexed.
+
+At the run list, `d` selects one run and `c` selects the current filtered list. Choose **history only** or
+**delete owned files**, inspect the run count and estimated MiB, then explicitly confirm. Command forms
+above provide the same confirmation. History-only removal hides entries durably but reclaims no disk
+space; `/runs clear files` or `/runs delete <runId> files` can later clean hidden entries too.
+
+Full cleanup removes only the workspace's matching `.pi-workflow/runs/` journal/summary,
+`.pi-workflow/sessions/<runId>/`, and run-prefixed `.pi-workflow/artifacts/runs/` directories. It never
+removes source files, plans, contracts, unrelated Pi sessions, custom external artifact locations or saved
+workflow definitions. Symlinked cleanup paths are refused. **Full cleanup deletes checkpoints and prevents resume**; history-only cleanup hides the entry
+but leaves its journal available for explicit resume by ID. A checkpoint that has settled is eligible; active,
+manually paused, waiting, and stopping executions are excluded, and eligibility is rechecked at confirmation.
+No automatic retention policy is enabled.
 
 ### Execution modes (`/wf`)
 

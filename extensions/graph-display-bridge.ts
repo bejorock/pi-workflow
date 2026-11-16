@@ -136,7 +136,7 @@ export class GraphDisplayBridge {
 				options.runId,
 				{ name: options.name, description: options.description },
 				options.abortController,
-				options.script && options.cwd ? { script: options.script, cwd: options.cwd } : undefined,
+				{ script: options.script, cwd: options.cwd, runKind: "workflow" },
 			);
 		} catch {
 			// A run that cannot be displayed still needs to execute.
@@ -268,6 +268,7 @@ export class GraphDisplayBridge {
 			} else if (result.status === "paused") {
 				this.manager.pauseRun(this.runId);
 			} else this.manager.completeRun(this.runId, result.finalResult, result.error);
+			this.manager.settleRun(this.runId);
 		} catch {
 			// Ignore display failures.
 		}

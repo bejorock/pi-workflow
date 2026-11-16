@@ -582,7 +582,7 @@ export default function (pi: ExtensionAPI) {
 					name: "subagent (parallel)",
 					description: `${params.tasks.length} tasks`,
 					phases: [{ title: "execution" }],
-				}, undefined, { cwd: ctx.cwd });
+				}, undefined, { cwd: ctx.cwd, runKind: "parallel" });
 
 				const liveResults: Array<{ agent: string; task: string; status: "running" | "done" | "error"; line?: string }> =
 					params.tasks.map((t) => ({ agent: t.agent, task: t.task, status: "running" }));
@@ -787,7 +787,7 @@ export default function (pi: ExtensionAPI) {
 					name: `subagent: ${agent.name}`,
 					description: params.task,
 					phases: [{ title: "execution" }],
-				}, undefined, { cwd: ctx.cwd });
+				}, undefined, { cwd: ctx.cwd, runKind: "subagent" });
 
 				const sessionDir = path.join(ctx.cwd, ".pi-workflow", "sessions", runId);
 				fs.mkdirSync(sessionDir, { recursive: true });
@@ -1304,19 +1304,34 @@ export default function (pi: ExtensionAPI) {
 	};
 
 	// --- Commands ---
-	pi.registerCommand("workflows", {
-		description: "Open the interactive /workflows navigator overlay",
-		handler: async (_args, ctx) => {
+	for (const command of ["runs", "workflows"]) pi.registerCommand(command, {
+		description: command === "runs" ? "Browse runs; delete <runId> [files] or clear [files] (confirmed)" : "Compatibility alias for /runs",
+		handler: async (args, ctx) => {
 			if (!ctx.hasUI) {
-				ctx.ui.notify("The /workflows navigator requires an interactive TUI session.", "warning");
+				ctx.ui.notify("The /runs navigator requires an interactive TUI session.", "warning");
 				return;
 			}
 			// Same cross-process gap as workflow_status: without a workflow
 			// having run in this process yet, journalDir is unset and the
 			// navigator would show "no runs" despite completed runs sitting
 			// on disk from earlier sessions.
-			if (!globalWorkflowManager.getJournalDir() && ctx.cwd) {
-				globalWorkflowManager.setJournalDir(`${ctx.cwd}/.pi-workflow/runs`);
+			if (ctx.cwd) globalWorkflowManager.setJournalDir(`${ctx.cwd}/.pi-workflow/runs`);
+			if (args.trim()) {
+				const { planRunCleanup, executeRunCleanup, cleanupDescription } = await import("./run-cleanup.ts");
+				const [action, ...rest] = args.trim().split(/\s+/);
+				const mode = rest.at(-1) === "files" ? "files" : "history";
+				const id = action === "delete" ? rest[0] : undefined;
+				if ((action !== "delete" && action !== "clear") || (action === "delete" && (!id || rest.length > (mode === "files" ? 2 : 1))) || (action === "clear" && rest.length > (mode === "files" ? 1 : 0))) {
+					ctx.ui.notify("Usage: /runs [delete <runId> [files] | clear [files]]", "warning"); return;
+				}
+				try {
+					const plan = planRunCleanup(globalWorkflowManager, id ? [id] : globalWorkflowManager.listRuns(mode === "files").map(run => run.runId), mode);
+					if (!plan.runIds.length) { ctx.ui.notify("No eligible settled runs to delete. Active/stopping/waiting runs are protected.", "warning"); return; }
+					if (await ctx.ui.confirm("Delete run history?", cleanupDescription(plan))) {
+						executeRunCleanup(globalWorkflowManager, plan); ctx.ui.notify(`Deleted ${plan.runIds.length} run(s).`, "info");
+					}
+				} catch (error) { ctx.ui.notify(String(error), "error"); }
+				return;
 			}
 			await openWorkflowNavigator(pi, globalWorkflowManager, ctx.ui);
 		},

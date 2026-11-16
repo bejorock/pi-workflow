@@ -1,12 +1,10 @@
 /**
- * Background-run UX task panel:
- *  - Displays a live status bar under the chat input while dynamic workflows run.
- *  - Automatically updates as agents start, complete, or report progress.
- *  - Shows a human-only completion toast and optional relay notification when background runs finish.
+ * Human-only completion toasts and optional relay notifications.
+ * Progress belongs to foreground tools and /runs, not a persistent widget.
  */
 
 import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
-import type { WorkflowManager, ManagedRun } from "./workflow-manager.ts";
+import { runKindLabel, type WorkflowManager, type ManagedRun } from "./workflow-manager.ts";
 import { renderWorkflowText } from "./workflow-display.ts";
 
 export interface TaskPanelOptions {
@@ -22,7 +20,7 @@ function holderOf(manager: WorkflowManager): TaskPanelHolder {
 }
 
 /**
- * Register background task panel listeners and status line updates.
+ * Register human-only completion listeners (no progress widget).
  *
  * The workflow manager survives Pi reload/session replacement, while a TUI
  * context does not. Replace the old listeners before installing this
@@ -37,49 +35,11 @@ export function registerTaskPanel(
 	const holder = holderOf(manager);
 	holder.cleanup?.();
 
-	const activeKeys = new Set<string>();
-
-	const updateStatus = (runId: string) => {
-		const run = manager.getRun(runId);
-		if (!run) return;
-
-		const key = `wf:${runId}`;
-		if (run.status === "running") {
-			activeKeys.add(key);
-			const agents = run.snapshot.agents;
-			const done = agents.filter((a) => a.status === "done").length;
-			const errors = agents.filter((a) => a.status === "error").length;
-			const active = agents.filter((a) => a.status === "running");
-
-			// A graph reports which node is running rather than a completion
-			// ratio. "3/5" implies a pipeline with a known end; a graph revisits
-			// nodes, so the denominator grows as it runs and the fraction can
-			// appear to go backwards. The useful question mid-run is "who is
-			// working now", and after a loop, "how many steps has this taken".
-			const position =
-				active.length === 1
-					? `${active[0].label}`
-					: active.length > 1
-						? `${active.length} running`
-						: `${done} step${done === 1 ? "" : "s"} done`;
-
-			const errorPart = errors ? `, ${errors} err` : "";
-			const statusText = `▶ ${run.snapshot.meta.name}: ${position}${errorPart} · step ${agents.length} · ${run.snapshot.totalTokens}t`;
-			ui.setStatus(key, statusText);
-		} else {
-			ui.setStatus(key, undefined);
-			activeKeys.delete(key);
-		}
-	};
-
-	const onRunEvent = (e: { runId: string }) => {
-		if (e?.runId) updateStatus(e.runId);
-	};
+	// Clear legacy widget keys on reload; foreground tools and /runs own progress.
+	for (const run of manager.listActiveRuns()) ui.setStatus(`wf:${run.runId}`, undefined);
 
 	const onComplete = (e: { runId: string; result?: unknown; error?: string }) => {
 		if (!e?.runId) return;
-		updateStatus(e.runId);
-
 		const run = manager.getRun(e.runId);
 		if (!run) return;
 
@@ -107,29 +67,16 @@ export function registerTaskPanel(
 		}
 	};
 
-	const events = ["agentStart", "agentEnd", "phase", "log", "paused", "resumed"];
-	// agentStart fires per node visit, so a revisited node refreshes the
-	// panel and the running label tracks the walk rather than freezing on the
-	// first occurrence.
-	for (const ev of events) {
-		manager.on(ev, onRunEvent);
-	}
+
 	manager.on("complete", onComplete);
 	manager.on("error", onComplete);
 	manager.on("stopped", onComplete);
 
 	const cleanup = () => {
-		for (const ev of events) {
-			manager.off(ev, onRunEvent);
-		}
 		manager.off("complete", onComplete);
 		manager.off("error", onComplete);
 		manager.off("stopped", onComplete);
 
-		for (const key of activeKeys) {
-			ui.setStatus(key, undefined);
-		}
-		activeKeys.clear();
 		if (holder.cleanup === cleanup) holder.cleanup = undefined;
 	};
 	holder.cleanup = cleanup;
@@ -137,7 +84,7 @@ export function registerTaskPanel(
 }
 
 /**
- * Format a completed workflow run result for conversation delivery.
+ * Format a completed run for a human notification.
  */
 export function deliverResultSummary(run: ManagedRun, error?: string): string {
 	const name = run.snapshot.meta.name || "workflow";
@@ -150,8 +97,9 @@ export function deliverResultSummary(run: ManagedRun, error?: string): string {
 	// participants were involved.
 	const scale = `${steps} step${steps === 1 ? "" : "s"}, ${tokens}t`;
 
+	const kind = runKindLabel(run.runKind);
 	if (error) {
-		return `✗ Workflow "${name}" failed after ${duration}s (${scale}):\n\nError: ${error}`;
+		return `✗ ${kind} "${name}" failed after ${duration}s (${scale}):\n\nError: ${error}`;
 	}
 
 	// The path shows where work actually went, including any loops back.
@@ -159,5 +107,5 @@ export function deliverResultSummary(run: ManagedRun, error?: string): string {
 	const pathLine = pathLog ? `\n${pathLog}\n` : "";
 
 	const summaryText = renderWorkflowText(run.snapshot, { compact: true });
-	return `✓ Workflow "${name}" completed in ${duration}s (${scale}).\n${pathLine}\n${summaryText}`;
+	return `✓ ${kind} "${name}" completed in ${duration}s (${scale}).\n${pathLine}\n${summaryText}`;
 }

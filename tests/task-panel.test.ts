@@ -29,7 +29,7 @@ function fakePi() {
 }
 
 function startRun(manager: WorkflowManager, name = "tdd_feature"): void {
-	manager.registerRun("r1", { name, description: "d" });
+	manager.registerRun("r1", { name, description: "d" }, undefined, {runKind: "workflow"});
 }
 
 function runNode(
@@ -45,7 +45,7 @@ function runNode(
 }
 
 describe("task panel status line", () => {
-	it("names the node currently running rather than a completion ratio", () => {
+	it("does not publish a running node status widget", () => {
 		// "3/5" implies a pipeline with a known end. A graph revisits nodes,
 		// so the denominator grows as it runs and the fraction can appear to
 		// go backwards. Mid-run, the useful question is who is working.
@@ -57,11 +57,11 @@ describe("task panel status line", () => {
 		runNode(manager, 1, "architect (architect)");
 		runNode(manager, 2, "green (green)", { finish: false });
 
-		expect(current()).toContain("green (green)");
+		expect(current()).toBe("");
 		expect(current()).not.toMatch(/\d+\/\d+ done/);
 	});
 
-	it("reports the step count so a loop is visible as progress", () => {
+	it("does not publish a widget during repeated visits", () => {
 		const manager = new WorkflowManager();
 		const { ui, current } = fakeUi();
 		registerTaskPanel(fakePi(), manager, ui);
@@ -71,10 +71,10 @@ describe("task panel status line", () => {
 		runNode(manager, 2, "green (green)");
 		runNode(manager, 3, "architect (architect)");
 
-		expect(current()).toContain("step 3");
+		expect(current()).toBe("");
 	});
 
-	it("falls back to completed steps when nothing is running", () => {
+	it("keeps the widget absent between nodes", () => {
 		const manager = new WorkflowManager();
 		const { ui, current } = fakeUi();
 		registerTaskPanel(fakePi(), manager, ui);
@@ -82,10 +82,10 @@ describe("task panel status line", () => {
 		startRun(manager);
 		runNode(manager, 1, "architect (architect)");
 
-		expect(current()).toContain("1 step done");
+		expect(current()).toBe("");
 	});
 
-	it("surfaces errors in the status line", () => {
+	it("keeps the widget absent after node errors", () => {
 		const manager = new WorkflowManager();
 		const { ui, current } = fakeUi();
 		registerTaskPanel(fakePi(), manager, ui);
@@ -93,10 +93,10 @@ describe("task panel status line", () => {
 		startRun(manager);
 		runNode(manager, 1, "green (green)", { status: "error" });
 
-		expect(current()).toContain("1 err");
+		expect(current()).toBe("");
 	});
 
-	it("reports concurrent nodes as a count", () => {
+	it("keeps the widget absent for concurrent nodes", () => {
 		const manager = new WorkflowManager();
 		const { ui, current } = fakeUi();
 		registerTaskPanel(fakePi(), manager, ui);
@@ -105,7 +105,7 @@ describe("task panel status line", () => {
 		runNode(manager, 1, "a", { finish: false });
 		runNode(manager, 2, "b", { finish: false });
 
-		expect(current()).toContain("2 running");
+		expect(current()).toBe("");
 	});
 
 	it("clears the status when the run finishes", () => {

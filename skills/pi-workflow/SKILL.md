@@ -38,11 +38,26 @@ The result is the subagent's output string. Use it in your response or chain it 
 subagent(tasks=[{"agent": "scout", "task": "Review auth module"}, {"agent": "scout", "task": "Review payment module"}], mode="parallel")
 ```
 
+## Run History and Cleanup
+
+`/runs` is the shared navigator for **Workflow**, **Subagent**, and **Parallel** entries; `/workflows`
+remains an alias. `f` filters All / Workflows / Subagents (including parallel runs). Progress stays in
+foreground tools and this panel; completion toasts and supervisor reminders remain, without a bottom widget.
+
+At the run list, `d` deletes selected history and `c` clears the filtered list. Choose history-only (hide,
+no disk reclaimed) or owned files, review the count/estimated bytes, then confirm. Command equivalents:
+`/runs delete <runId> [files]` and `/runs clear [files]`. Full cleanup also finds previously hidden runs.
+Active, waiting and stopping runs are excluded; confirmation rechecks state. **Full cleanup deletes
+checkpoint journals and prevents resume.** History-only retains the journal for explicit resume by ID.
+Only matching workspace run journals/summaries, local run artifacts and child sessions are eligible;
+source, plans, contracts, saved workflow definitions and unrelated sessions are not removed. No automatic
+retention policy is enabled. Never describe history-only cleanup as freeing disk space.
+
 ## Workflow Controller Lifecycle
 
 Every `workflow()` call **waits automatically** for completion or supervisor attention; there is no
-start-and-return background-only mode. The underlying engine still runs independently so UI widgets,
-events and human questions keep updating. Only **one active graph workflow** is allowed
+start-and-return background-only mode. The underlying engine still runs independently so UI events
+and human questions keep updating. Only **one active graph workflow** is allowed
 per Pi session, including paused runs and runs waiting for a human/supervisor. A legacy duplicate-run
 flag cannot bypass this cap. Do not start a second workflow while one is active.
 
@@ -648,7 +663,7 @@ workflow(loadWorkflow="audit", args={ repo: "..." })               # re-runs the
 
 Before writing a new workflow script from scratch, check whether a matching one was already saved (e.g. via `/saved-workflows` or by trying `loadWorkflow` first) — especially if the user asks to "run that workflow again" or describes a repeatable process. If `loadWorkflow` references an unknown name, the tool error lists the names that do exist. Use `saveWorkflow: true` when the user explicitly asks to save a workflow, or when the task is clearly a repeatable process worth reusing later; don't save one-off exploratory workflows by default.
 
-The user can also save a workflow after the fact from the `/workflows` TUI navigator by selecting a run and pressing `s` — no need to have passed `saveWorkflow: true` up front. This only works for runs still live in the current session (the script is kept in memory, not journaled); it won't work for runs restored from a prior session's journal.
+The user can also save a workflow after the fact from the `/runs` TUI navigator (`/workflows` remains an alias) by selecting a run and pressing `s` — no need to have passed `saveWorkflow: true` up front. This only works for runs still live in the current session (the script is kept in memory, not journaled); it won't work for runs restored from a prior session's journal.
 
 ## Session Execution Modes (`/wf`)
 
@@ -811,14 +826,14 @@ Summarizes every agent's status/error/result preview in the run.
 ```
 workflow_status({ runId: "wf-1234567890", agentId: 2 })
 ```
-Returns one agent's full prompt, complete (untruncated) result, and tool-call/output history — use this to see exactly what a failing (or any) agent did before it failed, without needing the interactive `/workflows` TUI.
+Returns one agent's full prompt, complete (untruncated) result, and tool-call/output history — use this to see exactly what a failing (or any) agent did before it failed, without needing the interactive `/runs` TUI.
 
 ### Stopping a run: `workflow_stop`
 
 ```
 workflow_stop({ runId: "wf-1234567890" })
 ```
-Cancels a running workflow — the same action as pressing `x` in the `/workflows` TUI, but callable directly. In-flight nodes are aborted; results already recorded stay in the run journal, so the run can still be resumed later with `resumeRunId`. Call with no arguments to list every workflow currently running:
+Cancels a running workflow — the same action as pressing `x` in the `/runs` TUI, but callable directly. In-flight nodes are aborted; results already recorded stay in the run journal, so the run can still be resumed later with `resumeRunId`. Call with no arguments to list every workflow currently running:
 
 ```
 workflow_stop()

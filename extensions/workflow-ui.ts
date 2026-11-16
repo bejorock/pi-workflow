@@ -12,7 +12,8 @@ import * as path from "node:path";
 import type { ExtensionAPI, ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import { parseKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import type { WorkflowManager, PersistedRun, ManagedRun } from "./workflow-manager.ts";
+import { runKindLabel, type RunKind, type WorkflowManager, type PersistedRun, type ManagedRun } from "./workflow-manager.ts";
+import { planRunCleanup, executeRunCleanup, cleanupDescription, type CleanupPlan } from "./run-cleanup.ts";
 import type { WorkflowAgentSnapshot, AgentHistoryEntry, WorkflowPhaseSnapshot } from "./workflow-display-types.ts";
 import { saveWorkflowScript } from "./workflow-library.ts";
 
@@ -207,6 +208,7 @@ export class NavigatorState {
 
 export interface RunRow {
 	runId: string;
+	runKind?: RunKind;
 	name: string;
 	status: string;
 	done: number;
@@ -275,14 +277,18 @@ function agentPhaseKey(a: WorkflowAgentSnapshot): string {
 }
 
 export class NavigatorModel {
+	filter: "all" | "workflows" | "subagents" = "all";
 	constructor(private manager: WorkflowManager) {}
 
+	cycleFilter(): void { this.filter = this.filter === "all" ? "workflows" : this.filter === "workflows" ? "subagents" : "all"; }
+
 	runs(): RunRow[] {
-		return this.manager.listRuns().map((r) => {
+		return this.manager.listRuns().filter(run => this.filter === "all" || (this.filter === "workflows" ? run.runKind === "workflow" : run.runKind === "subagent" || run.runKind === "parallel")).map((r) => {
 			const agents = r.agents || [];
 			const doneCount = agents.filter((a) => a.status === "done").length;
 			return {
 				runId: r.runId,
+				runKind: r.runKind,
 				name: asText(r.workflowName),
 				status: asText(r.status),
 				done: doneCount,
@@ -493,21 +499,21 @@ export function renderNavigatorFrame(
 		const runs = model.runs();
 		state.clamp(runs.length);
 
-		lines.push(theme.bold("Workflows"));
+		lines.push(theme.bold(`Runs · ${model.filter} (f filter)`));
 
 		if (runs.length === 0) {
-			lines.push(dim("  No runs yet. Start a workflow."));
+			lines.push(dim("  No matching runs. Start a workflow or subagent."));
 		} else {
 			for (let i = 0; i < runs.length; i++) {
 				const r = runs[i];
 				const icon = STATUS_ICON[r.status] ?? "?";
 				const meta = `${r.done}/${r.total}${r.totalTokens ? ` · ${compactTokens(r.totalTokens)}t` : ""}`;
-				lines.push(sel(i === state.cursor, `${icon} ${r.name}  ${dim(`${r.runId.slice(0, 8)} · ${r.status} · ${meta}`)}`));
+				lines.push(sel(i === state.cursor, `${icon} [${runKindLabel(r.runKind)}] ${r.name}  ${dim(`${r.runId.slice(0, 8)} · ${r.status} · ${meta}`)}`));
 			}
 		}
 
 		lines.push("");
-		lines.push(dim("↑/↓ select · enter open · p pause · x stop · r resume · s save · q quit"));
+		lines.push(dim("↑/↓ select · enter open · f filter · d delete · c clear · p/x/r control · s save · q quit"));
 
 	} else if ((state.kind === "phases" || state.kind === "agents") && state.runId) {
 		const phases = model.phases(state.runId);
@@ -527,7 +533,7 @@ export function renderNavigatorFrame(
 		const totalDone = phases.reduce((s, p) => s + p.done, 0);
 		const totalAgents = phases.reduce((s, p) => s + p.total, 0);
 		const headerUnit =
-			phases.length === 1 && phases[0].title === NO_PHASE_TITLE ? "nodes" : "agents";
+			runRow?.runKind === "workflow" ? "nodes" : "agents";
 		lines.push(dim(`${runRow?.status ?? "running"}  ${totalDone}/${totalAgents} ${headerUnit}`));
 
 		// Two-pane split
@@ -811,7 +817,7 @@ export function openWorkflowNavigator(
 				}, 125);
 			};
 
-			const events = ["agentStart", "agentEnd", "phase", "log", "complete", "error", "stopped", "paused", "resumed"];
+			const events = ["agentStart", "agentEnd", "phase", "log", "complete", "error", "stopped", "paused", "resumed", "deleted"];
 			const onEvent = () => rerender();
 			for (const ev of events) manager.on(ev, onEvent);
 			manager.on("agentHistory", onHistoryEvent);
@@ -822,6 +828,8 @@ export function openWorkflowNavigator(
 				if (historyRenderTimer) clearTimeout(historyRenderTimer);
 			};
 
+			let pending: {ids: string[]; plan?: CleanupPlan} | undefined;
+			let notice = "";
 			let _focused = false;
 			const component = {
 				get focused(): boolean { return _focused; },
@@ -840,10 +848,13 @@ export function openWorkflowNavigator(
 					const terminalRows = tui.terminal?.rows ?? 24;
 					const overlayRows = Math.max(8, Math.floor(terminalRows * 0.92));
 					const contentRows = Math.max(6, overlayRows - 2);
-					const raw = renderNavigatorFrame(state, model, innerWidth, themeAdapter, contentRows);
-					const title = titleColor(" workflows ");
+					const raw = pending
+						? [theme.bold("Delete run history"), ...((pending.plan ? cleanupDescription(pending.plan) : "Choose cleanup mode. Active/stopping/waiting runs are excluded.").match(new RegExp(`.{1,${Math.max(10, innerWidth - 2)}}`, "g")) ?? []), "", pending.plan ? "y confirm · any other key cancel" : "h history only · d delete owned files · esc cancel", "Full file cleanup deletes checkpoints and prevents resume."]
+						: renderNavigatorFrame(state, model, innerWidth, themeAdapter, contentRows);
+					if (notice && !pending) raw.push(theme.fg("warning", truncateToWidth(notice, innerWidth)));
+					const title = titleColor(" runs ");
 					const dashes = (n: number) => "\u2500".repeat(Math.max(0, n));
-					const topBorder = borderColor("\u256d\u2500") + title + borderColor(dashes(innerWidth - 10)) + borderColor("\u256e");
+					const topBorder = borderColor("\u256d\u2500") + title + borderColor(dashes(innerWidth - 5)) + borderColor("\u256e");
 					const botBorder = borderColor(`\u2570${dashes(innerWidth + 2)}\u256f`);
 					const wrapAndBg = (line: string) => {
 						const padded = truncateToWidth(line, innerWidth, "", true);
@@ -855,6 +866,24 @@ export function openWorkflowNavigator(
 				},
 
 				handleInput(data: string): void {
+					if (pending) {
+						try {
+							if (pending.plan) {
+								if (data === "y") { const result = executeRunCleanup(manager, pending.plan); notice = `Deleted ${result.runIds.length} run(s).`; }
+								pending = undefined;
+							} else if (data === "h" || data === "d") {
+								pending.plan = planRunCleanup(manager, pending.ids, data === "d" ? "files" : "history");
+								if (!pending.plan.runIds.length) { notice = "No eligible settled runs. Active/stopping/waiting runs are protected."; pending = undefined; }
+							} else pending = undefined;
+						} catch (error) { notice = String(error); pending = undefined; }
+						rerender(); return;
+					}
+					if (state.kind === "runs" && data === "f") { model.cycleFilter(); state.cursor = 0; rerender(); return; }
+					if (state.kind === "runs" && (data === "d" || data === "c")) {
+						const rows = model.runs();
+						pending = { ids: data === "c" ? rows.map(run => run.runId) : rows[state.cursor] ? [rows[state.cursor].runId] : [] };
+						rerender(); return;
+					}
 					const runs = model.runs();
 					const count =
 						state.kind === "runs"

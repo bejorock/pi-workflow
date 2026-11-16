@@ -9,6 +9,8 @@ import * as path from "node:path";
 import type { WorkflowSnapshot, WorkflowAgentSnapshot, AgentHistoryEntry } from "./workflow-display-types.ts";
 import type { WorkflowMeta } from "./workflow-display-types.ts";
 
+export type RunKind = "workflow" | "subagent" | "parallel" | "unknown";
+export const runKindLabel = (kind?: RunKind): string => ({workflow: "Workflow", subagent: "Subagent", parallel: "Parallel", unknown: "Unknown"}[kind ?? "unknown"]);
 export type RunStatus = "running" | "paused" | "completed" | "error" | "stopped";
 
 /**
@@ -24,6 +26,9 @@ export const DEFAULT_MAX_CONCURRENT_RUNS = 3;
 
 export interface ManagedRun {
 	runId: string;
+	runKind?: RunKind;
+	/** False until the executor has relinquished all writers, including after stop. */
+	settled?: boolean;
 	status: RunStatus;
 	snapshot: WorkflowSnapshot;
 	startedAt: number;
@@ -43,6 +48,7 @@ export interface ManagedRun {
 
 export interface PersistedRun {
 	runId: string;
+	runKind?: RunKind;
 	workflowName: string;
 	status: RunStatus;
 	agents: WorkflowAgentSnapshot[];
@@ -75,10 +81,13 @@ export class WorkflowManager extends EventEmitter {
 		runId: string,
 		meta: WorkflowMeta,
 		abortController?: AbortController,
-		source?: { script?: string; cwd?: string },
+		source?: { script?: string; cwd?: string; runKind?: RunKind },
 	): ManagedRun {
+		if (source?.cwd) this.setJournalDir(path.join(source.cwd, ".pi-workflow", "runs"));
 		const run: ManagedRun = {
 			runId,
+			runKind: source?.runKind ?? (source?.script ? "workflow" : "unknown"),
+			settled: false,
 			status: "running",
 			snapshot: {
 				meta,
@@ -103,7 +112,11 @@ export class WorkflowManager extends EventEmitter {
 			cwd: source?.cwd,
 		};
 
+		// Explicit resume re-exposes history previously hidden by the user.
+		const hidden = this.hiddenIds();
+		if (hidden.delete(runId)) this.writeHiddenIds(hidden);
 		this.runs.set(runId, run);
+		this.persistRun(run);
 		this.emit("agentStart", { runId });
 		return run;
 	}
@@ -512,6 +525,7 @@ export class WorkflowManager extends EventEmitter {
 		const run = this.runs.get(runId);
 		if (!run) return;
 
+		run.settled = true;
 		run.status = error ? "error" : "completed";
 		run.snapshot.status = error ? "error" : "completed";
 		run.snapshot.durationMs = Date.now() - run.startedAt;
@@ -523,6 +537,7 @@ export class WorkflowManager extends EventEmitter {
 		}
 
 		run.updatedAt = Date.now();
+		this.persistRun(run);
 		this.emit(error ? "error" : "complete", { runId, result, error });
 	}
 
@@ -537,6 +552,7 @@ export class WorkflowManager extends EventEmitter {
 			run.abortController.abort();
 		}
 		run.updatedAt = Date.now();
+		this.persistRun(run);
 		this.emit("stopped", { runId });
 		return true;
 	}
@@ -558,8 +574,10 @@ export class WorkflowManager extends EventEmitter {
 		if (!run || run.status !== "paused") return false;
 
 		run.status = "running";
+		run.settled = false;
 		run.snapshot.status = "running";
 		run.updatedAt = Date.now();
+		this.persistRun(run);
 		this.emit("resumed", { runId });
 		return true;
 	}
@@ -618,9 +636,64 @@ export class WorkflowManager extends EventEmitter {
 		return { ok: true };
 	}
 
-	listRuns(): PersistedRun[] {
-		const activeList: PersistedRun[] = Array.from(this.runs.values()).map((r) => ({
+	/** Called only once the engine has closed its writers, not when stop is requested. */
+	settleRun(runId: string): void {
+		const run = this.runs.get(runId);
+		if (run) { run.settled = true; this.persistRun(run); }
+	}
+
+	private persistRun(run: ManagedRun): void {
+		if (!run.journalDir || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(run.runId)) return;
+		try {
+			fs.mkdirSync(run.journalDir, { recursive: true });
+			const file = path.join(run.journalDir, `${run.runId}.run.json`);
+			const tmp = `${file}.${process.pid}.tmp`;
+			fs.writeFileSync(tmp, JSON.stringify({runId: run.runId, runKind: run.runKind, workflowName: run.snapshot.meta.name, status: run.status, agents: run.snapshot.agents.map(({history, ...agent}) => agent), totalTokens: run.snapshot.totalTokens, durationMs: run.snapshot.durationMs, updatedAt: run.updatedAt, settled: run.settled}));
+			fs.renameSync(tmp, file);
+		} catch { /* History must not break execution. */ }
+	}
+
+	private hiddenIds(): Set<string> {
+		try { return new Set(JSON.parse(fs.readFileSync(path.join(this.journalDir!, ".hidden-runs.json"), "utf8"))); } catch { return new Set(); }
+	}
+
+	canDeleteRun(id: string): boolean {
+		const live = this.runs.get(id);
+		if (live && (live.settled !== true || live.status === "running")) return false;
+		const summary = this.journalDir && path.join(this.journalDir, `${id}.run.json`);
+		if (summary && fs.existsSync(summary)) {
+			try {
+				const saved = JSON.parse(fs.readFileSync(summary, "utf8"));
+				if (saved.runId !== id || saved.settled !== true) return false;
+			} catch { return false; } // Corrupt ownership/liveness metadata must fail closed.
+		}
+		const run = this.listRuns(true).find(run => run.runId === id);
+		// Historical running/unknown journals may still have an external writer.
+		return Boolean(run && ["completed", "error", "stopped", "paused"].includes(run.status));
+	}
+
+	hideRuns(ids: string[]): void {
+		if (!this.journalDir) throw new Error("No run directory");
+		const hidden = this.hiddenIds();
+		for (const id of ids) hidden.add(id);
+		this.writeHiddenIds(hidden);
+		for (const id of ids) this.runs.delete(id);
+		this.emit("deleted", {runIds: ids});
+	}
+
+	private writeHiddenIds(hidden: Set<string>): void {
+		if (!this.journalDir) return;
+		fs.mkdirSync(this.journalDir, { recursive: true });
+		const file = path.join(this.journalDir, ".hidden-runs.json");
+		fs.writeFileSync(`${file}.tmp`, JSON.stringify([...hidden]));
+		fs.renameSync(`${file}.tmp`, file);
+	}
+
+	listRuns(includeHidden = false): PersistedRun[] {
+		const hidden = includeHidden ? new Set<string>() : this.hiddenIds();
+		const activeList: PersistedRun[] = Array.from(this.runs.values()).filter(r => !hidden.has(r.runId) && (!this.journalDir || !r.journalDir || r.journalDir === this.journalDir)).map((r) => ({
 			runId: r.runId,
+			runKind: r.runKind,
 			workflowName: r.snapshot.meta.name || "unnamed",
 			status: r.status,
 			agents: r.snapshot.agents,
@@ -635,12 +708,23 @@ export class WorkflowManager extends EventEmitter {
 
 		// Read historical run files from journalDir
 		try {
+			const summaries = fs.readdirSync(this.journalDir).filter(f => f.endsWith(".run.json"));
 			const files = fs.readdirSync(this.journalDir).filter((f) => f.endsWith(".jsonl"));
 			const activeIds = new Set(activeList.map((r) => r.runId));
 
+			for (const file of summaries) {
+				try {
+					const saved = JSON.parse(fs.readFileSync(path.join(this.journalDir, file), "utf8")) as PersistedRun & { settled?: boolean };
+					if (saved.runId !== file.slice(0, -9) || hidden.has(saved.runId) || activeIds.has(saved.runId)) continue;
+					// Graph journals remain the source of truth after checkpoint resume/correction.
+					const journal = parsePersistedJournal(path.join(this.journalDir, `${saved.runId}.jsonl`), saved.runId);
+					activeList.push(journal && saved.settled === true ? {...journal, runKind: saved.runKind ?? journal.runKind} : saved);
+					activeIds.add(saved.runId);
+				} catch { /* Ignore corrupt summaries. */ }
+			}
 			for (const file of files) {
 				const runId = file.slice(0, -6);
-				if (activeIds.has(runId)) continue;
+				if (activeIds.has(runId) || hidden.has(runId)) continue;
 
 				const filePath = path.join(this.journalDir, file);
 				const run = parsePersistedJournal(filePath, runId);
@@ -670,6 +754,7 @@ function parsePersistedJournal(filePath: string, runId: string): PersistedRun | 
 		const lines = content.split("\n").filter(Boolean);
 		if (lines.length === 0) return undefined;
 
+		let runKind: RunKind = "unknown";
 		let workflowName = "workflow";
 		let status: RunStatus = "running";
 		const agents: WorkflowAgentSnapshot[] = [];
@@ -679,6 +764,7 @@ function parsePersistedJournal(filePath: string, runId: string): PersistedRun | 
 		for (const line of lines) {
 			const rec = JSON.parse(line);
 			if (rec.type === "graph_run") {
+				runKind = "workflow";
 				workflowName = rec.name || workflowName;
 			} else if (rec.type === "node") {
 				const label = rec.agentName ? `${rec.nodeId} (${rec.agentName})` : rec.nodeId;
@@ -719,6 +805,7 @@ function parsePersistedJournal(filePath: string, runId: string): PersistedRun | 
 		const stats = fs.statSync(filePath);
 		return {
 			runId,
+			runKind,
 			workflowName,
 			status,
 			agents,
