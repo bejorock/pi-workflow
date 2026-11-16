@@ -76,7 +76,7 @@ g.run();`;
 			{ name: "workflow_b", description: "second one", whenToUse: "when doing b things" },
 		);
 
-		const saved = listSavedWorkflows(tempDir).filter((w) => w.source !== "builtin");
+		const saved = listSavedWorkflows(tempDir).filter((w) => w.source === "project");
 		expect(saved.length).toBe(2);
 		expect(saved[0].name).toBe("workflow_b");
 		expect(saved[0].whenToUse).toBe("when doing b things");
@@ -86,7 +86,7 @@ g.run();`;
 	});
 
 	it("returns an empty list when no workflows have been saved", () => {
-		expect(listSavedWorkflows(tempDir).filter((w) => w.source !== "builtin")).toEqual([]);
+		expect(listSavedWorkflows(tempDir).filter((w) => w.source === "project")).toEqual([]);
 	});
 
 	it("skips unparsable files when listing instead of throwing", () => {
@@ -96,7 +96,7 @@ g.run();`;
 		const scriptGood = `export const meta = { name: 'good_workflow', description: 'fine' };\nconst g = graph();\ng.node('a', agent('scout', () => 'do it'));\ng.edge('a', END);\ng.run();`;
 		saveWorkflowScript(tempDir, scriptGood, { name: "good_workflow", description: "fine" });
 
-		const saved = listSavedWorkflows(tempDir).filter((w) => w.source !== "builtin");
+		const saved = listSavedWorkflows(tempDir).filter((w) => w.source === "project");
 		expect(saved.length).toBe(1);
 		expect(saved[0].name).toBe("good_workflow");
 	});

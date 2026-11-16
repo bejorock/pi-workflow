@@ -45,7 +45,8 @@ import {
 	resolveCurrentMaxSubagentDepth,
 	INTERCOM_DETACH_REQUEST_EVENT,
 } from "./types.ts";
-import { listSavedWorkflows, deleteSavedWorkflow, createListWorkflowsTool } from "./workflow-library.ts";
+import { createListWorkflowsTool } from "./workflow-library.ts";
+import { openWorkflowLibrary } from "./workflow-library-ui.ts";
 import { getFinalOutput, formatProgressLine } from "./utils.ts";
 import { TechnicalFailureError, type FailureClassification } from "./failure-classifier.ts";
 import { WorkflowManager } from "./workflow-manager.ts";
@@ -988,6 +989,7 @@ export default function (pi: ExtensionAPI) {
 		clearInterval(reminderTimer); reminders.clear(); workflowController.stopAll(); globalBroker.stop();
 	});
 	pi.on("session_start", (_event, ctx) => {
+		ctx.ui.setWidget("saved-workflows", undefined);
 		latestReminderUi = ctx.ui;
 		clearInterval(reminderTimer);
 		reminderIsIdle = () => ctx.isIdle();
@@ -1304,8 +1306,8 @@ export default function (pi: ExtensionAPI) {
 	};
 
 	// --- Commands ---
-	for (const command of ["runs", "workflows"]) pi.registerCommand(command, {
-		description: command === "runs" ? "Browse runs; delete <runId> [files] or clear [files] (confirmed)" : "Compatibility alias for /runs",
+	pi.registerCommand("runs", {
+		description: "Browse runs; delete <runId> [files] or clear [files] (confirmed)",
 		handler: async (args, ctx) => {
 			if (!ctx.hasUI) {
 				ctx.ui.notify("The /runs navigator requires an interactive TUI session.", "warning");
@@ -1369,41 +1371,12 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
-	pi.registerCommand("saved-workflows", {
-		description: "List saved workflows (or `/saved-workflows delete <name>` to remove one)",
+	pi.registerCommand("workflows", {
+		description: "Browse saved workflow scripts in a panel (preview, refresh, confirmed deletion)",
 		handler: async (args, ctx) => {
-			const runCwd = ctx.cwd;
-			const trimmed = (args || "").trim();
-			if (trimmed.startsWith("delete ")) {
-				const name = trimmed.slice("delete ".length).trim();
-				if (!name) {
-					ctx.ui.notify("Usage: /saved-workflows delete <name>", "warning");
-					return;
-				}
-				const removed = deleteSavedWorkflow(runCwd, name);
-				ctx.ui.notify(removed ? `Deleted saved workflow "${name}".` : `No saved workflow named "${name}" found.`, removed ? "info" : "warning");
-				return;
-			}
-
-			const saved = listSavedWorkflows(runCwd);
-			if (saved.length === 0) {
-				ctx.ui.notify(
-					'No saved workflows yet. Run the workflow tool with saveWorkflow: true to persist a script to .pi-workflow/workflows/ for reuse via loadWorkflow.',
-					"info",
-				);
-				return;
-			}
-
-			const lines = ["Saved workflows (.pi-workflow/workflows/):", ""];
-			for (const wf of saved) {
-				const savedAgo = new Date(wf.savedAt).toISOString();
-				lines.push(`• ${wf.name}`);
-				lines.push(`  ${wf.description}`);
-				if (wf.whenToUse) lines.push(`  When to use: ${wf.whenToUse}`);
-				lines.push(`  Saved: ${savedAgo} · ${wf.sizeBytes}B · loadWorkflow: "${wf.name}"`);
-				lines.push("");
-			}
-			ctx.ui.setWidget("saved-workflows", lines);
+			if (!ctx.hasUI) { ctx.ui.notify("The /workflows library requires an interactive TUI session.", "warning"); return; }
+			if (args.trim()) { ctx.ui.notify("Use /workflows to browse; press d in the panel to delete a selected script.", "warning"); return; }
+			await openWorkflowLibrary(ctx.cwd, ctx.ui);
 		},
 	});
 

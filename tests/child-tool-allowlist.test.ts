@@ -80,6 +80,10 @@ describe("real child tool allowlists", () => {
 	it("adds only the requested structured output completion protocol to an empty list", async () => {
 		const { session } = await startChild([], true);
 		expect(session.getActiveToolNames()).toEqual(["structured_output"]);
+		const commands = session.extensionRunner.getRegisteredCommands().map(command => command.name);
+		expect(commands).toContain("runs");
+		expect(commands).toContain("workflows");
+		expect(commands).not.toContain("saved-workflows");
 		const result = await session.extensionRunner.emitToolCall({ type: "tool_call", toolCallId: "output", toolName: "structured_output", input: { value: {} } });
 		expect(result?.block).not.toBe(true);
 	});

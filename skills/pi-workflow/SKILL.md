@@ -40,8 +40,8 @@ subagent(tasks=[{"agent": "scout", "task": "Review auth module"}, {"agent": "sco
 
 ## Run History and Cleanup
 
-`/runs` is the shared navigator for **Workflow**, **Subagent**, and **Parallel** entries; `/workflows`
-remains an alias. `f` filters All / Workflows / Subagents (including parallel runs). Progress stays in
+`/runs` is the shared navigator for **Workflow**, **Subagent**, and **Parallel** entries.
+`/workflows` is the separate saved-script library panel, not a run-history alias. `f` filters All / Workflows / Subagents (including parallel runs). Progress stays in
 foreground tools and this panel; completion toasts and supervisor reminders remain, without a bottom widget.
 
 At the run list, `d` deletes selected history and `c` clears the filtered list. Choose history-only (hide,
@@ -663,9 +663,15 @@ workflow(script="...", saveWorkflow=true)                      # persists to .pi
 workflow(loadWorkflow="audit", args={ repo: "..." })               # re-runs the saved script; `script` not needed
 ```
 
-Before writing a new workflow script from scratch, check whether a matching one was already saved (e.g. via `/saved-workflows` or by trying `loadWorkflow` first) — especially if the user asks to "run that workflow again" or describes a repeatable process. If `loadWorkflow` references an unknown name, the tool error lists the names that do exist. Use `saveWorkflow: true` when the user explicitly asks to save a workflow, or when the task is clearly a repeatable process worth reusing later; don't save one-off exploratory workflows by default.
+Before writing a new workflow script from scratch, check whether a matching one was already saved (e.g. via `/workflows` or by trying `loadWorkflow` first) — especially if the user asks to "run that workflow again" or describes a repeatable process. If `loadWorkflow` references an unknown name, the tool error lists the names that do exist. Use `saveWorkflow: true` when the user explicitly asks to save a workflow, or when the task is clearly a repeatable process worth reusing later; don't save one-off exploratory workflows by default.
 
-The user can also save a workflow after the fact from the `/runs` TUI navigator (`/workflows` remains an alias) by selecting a run and pressing `s` — no need to have passed `saveWorkflow: true` up front. This only works for runs still live in the current session (the script is kept in memory, not journaled); it won't work for runs restored from a prior session's journal.
+`/workflows` opens a library panel with project/user/bundled sources, details, and a scrollable,
+syntax-highlighted script preview. Browsing never executes scripts. Enter/Tab focuses code, ↑/↓ scrolls,
+PgUp/PgDn pages, ←/→ pans code, `r` refreshes, and `q` closes. `d` requests deletion of the selected
+project/user script; `y` confirms, any other key cancels. Bundled scripts are read-only. On narrow
+terminals Tab switches between list and preview. There is no `/saved-workflows` command or library widget.
+
+The user can also save a workflow after the fact from the `/runs` TUI navigator by selecting a run and pressing `s` — no need to have passed `saveWorkflow: true` up front. This only works for runs still live in the current session (the script is kept in memory, not journaled); it won't work for runs restored from a prior session's journal.
 
 ## Session Execution Modes (`/wf`)
 

@@ -983,12 +983,24 @@ without being forced to read them.
 | `/runs` | Unified run navigator: typed workflows, subagents and parallel delegations; `f` filters, `d` deletes selected, `c` clears the filtered list |
 | `/runs delete <runId> [files]` | Confirm removal of selected history; add `files` to reclaim run-owned disk space |
 | `/runs clear [files]` | Confirm cleanup of eligible settled history in this workspace, including previously hidden runs when `files` is supplied |
-| `/workflows` | Compatibility alias for `/runs` (same cleanup arguments) |
+| `/workflows` | Saved workflow library panel: browse details, preview highlighted scripts, confirmed deletion |
 | `/plans` | Interactive TUI navigator: browse and read plans in `.pi-workflow/plans/` |
 | `/contracts` | Interactive TUI navigator: browse contracts with type/status colour coding |
 | `/wf normal\|plan\|workflow` | Switch execution mode (Normal, Plan, or Workflow) |
 | `/agents` | Show the discovered agent roster |
-| `/saved-workflows` | List or delete saved workflow scripts |
+
+### Saved workflow library
+
+`/workflows` opens an interactive panel, not a widget. Select a saved script on the left to view
+its description, when-to-use guidance, source (**project / user / bundled**), file path and actual
+syntax-highlighted code. Browsing only reads and parses scripts; it never executes them.
+
+Use ↑/↓ to select, Enter/Tab to focus the code, ↑/↓ or PgUp/PgDn to scroll, ←/→ to pan long code
+lines, `r` to refresh, and `q` to close. Narrow terminals switch between list and preview with Tab.
+Press `d` to request deletion of the selected project/user script, then `y` to confirm (any other key
+cancels). Bundled scripts are read-only. Changed files must be reconfirmed; symlink paths are refused.
+Deleting a saved script does not delete run history, source files outside the library, plans or contracts.
+The old `/saved-workflows` command is removed; `/runs` is the separate execution/history panel.
 
 ### Foreground controller over background execution
 
