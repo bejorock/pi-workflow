@@ -19,7 +19,20 @@
  * - Journal: nodeType "command" round-trips
  */
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+
+const runHistoryRoots: string[] = [];
+function isolatedRunCwd(): string {
+	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "pi-command-history-"));
+	runHistoryRoots.push(cwd);
+	return cwd;
+}
+afterEach(() => {
+	for (const cwd of runHistoryRoots.splice(0)) fs.rmSync(cwd, { recursive: true, force: true });
+});
 import {
 	agent,
 	command,
@@ -153,7 +166,7 @@ describe("createNodeRunner: command nodes", () => {
 	it("keeps timers and live run state responsive while a command runs", async () => {
 		const { WorkflowManager } = await import("../extensions/workflow-manager.ts");
 		const manager = new WorkflowManager();
-		manager.registerRun("live", { name: "live" }, undefined, { cwd });
+		manager.registerRun("live", { name: "live" }, undefined, { cwd: isolatedRunCwd() });
 		let finished = false;
 		const pending = runnerWith()(commandNode("test", command("sleep 0.3")), {}, { step: 1, runId: "r1" })
 			.then(result => { finished = true; return result; });
@@ -451,7 +464,7 @@ describe("command node in full graph walk", () => {
 	it("publishes real parallel running nodes before the fan-in completes", async () => {
 		const { WorkflowManager } = await import("../extensions/workflow-manager.ts");
 		const { GraphDisplayBridge } = await import("../extensions/graph-display-bridge.ts");
-		const cwd = process.cwd();
+		const cwd = isolatedRunCwd();
 		const manager = new WorkflowManager();
 		const display = new GraphDisplayBridge({ manager, runId: "responsive-wave", name: "responsive-wave", description: "", cwd, script: "test" });
 		const g = createGraphFactory().graph();

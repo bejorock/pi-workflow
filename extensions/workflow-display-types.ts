@@ -26,7 +26,7 @@ export type { AgentHistoryEntry };
 /**
  * Current status of a single agent in the workflow.
  */
-export type AgentStatus = "queued" | "running" | "done" | "error" | "skipped" | "cached";
+export type AgentStatus = "queued" | "running" | "done" | "error" | "skipped" | "cached" | "unknown";
 
 /**
  * Per-agent snapshot for display.

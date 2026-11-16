@@ -1052,7 +1052,11 @@ The separate `/wf` execution-mode indicator is unchanged.
 The shared panel labels entries **Workflow**, **Subagent**, or **Parallel** using persisted metadata.
 `f` cycles All / Workflows / Subagents (the latter includes parallel delegations). Legacy graph journals
 are recognized by their graph records; insufficient legacy metadata is labelled **Unknown**, never guessed
-from the run ID. Direct subagent summaries now survive restart too; old untracked subagent files are not
+from the run ID. Only executions tracked by the current Pi process are confirmed **Running**.
+Unfinished disk history (including a different Pi process's unsettled run) is shown as **Incomplete /
+unverified**, not assumed alive or dead. These entries remain protected from cleanup; the panel does not
+restart them or spend tokens. Terminal journals and settled summaries still show their recorded outcome.
+Direct subagent summaries now survive restart too; old untracked subagent files are not
 retroactively indexed.
 
 At the run list, `d` selects one run and `c` selects the current filtered list. Choose **history only** or

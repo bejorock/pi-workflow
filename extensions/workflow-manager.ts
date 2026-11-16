@@ -11,7 +11,7 @@ import type { WorkflowMeta } from "./workflow-display-types.ts";
 
 export type RunKind = "workflow" | "subagent" | "parallel" | "unknown";
 export const runKindLabel = (kind?: RunKind): string => ({workflow: "Workflow", subagent: "Subagent", parallel: "Parallel", unknown: "Unknown"}[kind ?? "unknown"]);
-export type RunStatus = "running" | "paused" | "completed" | "error" | "stopped";
+export type RunStatus = "running" | "paused" | "completed" | "error" | "stopped" | "incomplete";
 
 /**
  * Cap on runs executing at once.
@@ -718,7 +718,12 @@ export class WorkflowManager extends EventEmitter {
 					if (saved.runId !== file.slice(0, -9) || hidden.has(saved.runId) || activeIds.has(saved.runId)) continue;
 					// Graph journals remain the source of truth after checkpoint resume/correction.
 					const journal = parsePersistedJournal(path.join(this.journalDir, `${saved.runId}.jsonl`), saved.runId);
-					activeList.push(journal && saved.settled === true ? {...journal, runKind: saved.runKind ?? journal.runKind} : saved);
+					const historical = journal && saved.settled === true ? {...journal, runKind: saved.runKind ?? journal.runKind} : saved;
+					// Disk records are observations, not proof that an executor still exists.
+					// Only this manager's live map can confirm an execution is running.
+					activeList.push(saved.settled !== true || historical.status === "running"
+						? {...historical, status: "incomplete", agents: historical.agents.map(agent => agent.status === "running" ? {...agent, status: "unknown" as const} : agent)}
+						: historical);
 					activeIds.add(saved.runId);
 				} catch { /* Ignore corrupt summaries. */ }
 			}
@@ -756,7 +761,8 @@ function parsePersistedJournal(filePath: string, runId: string): PersistedRun | 
 
 		let runKind: RunKind = "unknown";
 		let workflowName = "workflow";
-		let status: RunStatus = "running";
+		let status: RunStatus = "incomplete";
+		let hasFinalResult = false;
 		const agents: WorkflowAgentSnapshot[] = [];
 		let totalTokens = 0;
 		let durationMs = 0;
@@ -793,6 +799,7 @@ function parsePersistedJournal(filePath: string, runId: string): PersistedRun | 
 				const node = agents.find(agent => agent.step === rec.step);
 				if (node && node.status !== "error") { node.result = rec.result; node.resultPreview = preview(rec.result); }
 			} else if (rec.type === "graph_result") {
+				hasFinalResult = true;
 				if (rec.status === "paused") status = "paused";
 				else if (rec.status === "aborted") status = "stopped";
 				else if (rec.status === "max_iterations" || rec.error) status = "error";
@@ -807,7 +814,7 @@ function parsePersistedJournal(filePath: string, runId: string): PersistedRun | 
 			runId,
 			runKind,
 			workflowName,
-			status,
+			status: hasFinalResult ? status : "incomplete",
 			agents,
 			totalTokens,
 			durationMs,

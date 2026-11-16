@@ -32,6 +32,21 @@ describe("unified run persistence and cleanup",()=>{
   const restored=new WorkflowManager(f.dir);expect(restored.listRuns()).toEqual([]);
   executeRunCleanup(restored,planRunCleanup(restored,["graph-100"],"files"));expect(fs.existsSync(artifact)).toBe(false);
  });
+ it("never treats unowned disk records as confirmed running and keeps incomplete history protected",()=>{
+  const f=fixture();f.start("external","subagent");
+  f.manager.markAgentStart("external",0,{id:1,label:"child",prompt:"work",status:"running"});
+  expect(f.manager.listRuns()[0].status).toBe("running");
+  const fresh=new WorkflowManager(f.dir);expect(fresh.listRuns()[0].status).toBe("incomplete");expect(fresh.canDeleteRun("external")).toBe(false);
+  f.file(".pi-workflow/runs/legacy.jsonl",JSON.stringify({type:"graph_run",name:"legacy"})+"\n"+JSON.stringify({type:"node",nodeId:"bad",status:"failed"}));
+  expect(fresh.listRuns().find(run=>run.runId==="legacy")?.status).toBe("incomplete");expect(fresh.canDeleteRun("legacy")).toBe(false);
+  expect(renderNavigatorText(new NavigatorState(),new NavigatorModel(fresh),160).join("\n")).toContain("incomplete / unverified");
+  f.manager.completeRun("external");expect(fresh.listRuns().find(run=>run.runId==="external")?.status).toBe("completed");
+ });
+ it("does not trust terminal journals over an unowned unsettled summary or display its agents as running",()=>{
+  const f=fixture();f.start("external");f.file(".pi-workflow/runs/external.jsonl",JSON.stringify({type:"graph_result",status:"completed"}));
+  const summary=path.join(f.dir,"external.run.json");const saved=JSON.parse(fs.readFileSync(summary,"utf8"));saved.agents=[{id:1,label:"child",status:"running"}];fs.writeFileSync(summary,JSON.stringify(saved));
+  const run=new WorkflowManager(f.dir).listRuns()[0];expect(run.status).toBe("incomplete");expect(run.agents[0].status).toBe("unknown");
+ });
  it("re-exposes a hidden run on explicit resume registration and refuses corrupt liveness metadata",()=>{
   const f=fixture();f.start("graph-7");f.manager.completeRun("graph-7");executeRunCleanup(f.manager,planRunCleanup(f.manager,["graph-7"],"history"));
   f.start("graph-7");expect(f.manager.listRuns().map(run=>run.runId)).toEqual(["graph-7"]);expect(f.manager.canDeleteRun("graph-7")).toBe(false);

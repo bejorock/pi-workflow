@@ -508,7 +508,7 @@ export function renderNavigatorFrame(
 				const r = runs[i];
 				const icon = STATUS_ICON[r.status] ?? "?";
 				const meta = `${r.done}/${r.total}${r.totalTokens ? ` · ${compactTokens(r.totalTokens)}t` : ""}`;
-				lines.push(sel(i === state.cursor, `${icon} [${runKindLabel(r.runKind)}] ${r.name}  ${dim(`${r.runId.slice(0, 8)} · ${r.status} · ${meta}`)}`));
+				lines.push(sel(i === state.cursor, `${icon} [${runKindLabel(r.runKind)}] ${r.name}  ${dim(`${r.runId.slice(0, 8)} · ${r.status === "incomplete" ? "incomplete / unverified" : r.status} · ${meta}`)}`));
 			}
 		}
 
@@ -534,7 +534,7 @@ export function renderNavigatorFrame(
 		const totalAgents = phases.reduce((s, p) => s + p.total, 0);
 		const headerUnit =
 			runRow?.runKind === "workflow" ? "nodes" : "agents";
-		lines.push(dim(`${runRow?.status ?? "running"}  ${totalDone}/${totalAgents} ${headerUnit}`));
+		lines.push(dim(`${runRow?.status === "incomplete" ? "incomplete / unverified (no live owner verified)" : runRow?.status ?? "unknown"}  ${totalDone}/${totalAgents} ${headerUnit}`));
 
 		// Two-pane split
 		const leftW = Math.max(16, Math.min(32, Math.floor(width * 0.36)));
@@ -720,6 +720,7 @@ export function renderNavigatorFrame(
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 const STATUS_ICON: Record<string, string> = {
+	incomplete: "?",
 	running: "◆",
 	paused: "⏸",
 	completed: "✓",

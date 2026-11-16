@@ -47,7 +47,9 @@ foreground tools and this panel; completion toasts and supervisor reminders rema
 At the run list, `d` deletes selected history and `c` clears the filtered list. Choose history-only (hide,
 no disk reclaimed) or owned files, review the count/estimated bytes, then confirm. Command equivalents:
 `/runs delete <runId> [files]` and `/runs clear [files]`. Full cleanup also finds previously hidden runs.
-Active, waiting and stopping runs are excluded; confirmation rechecks state. **Full cleanup deletes
+Active, waiting and stopping runs are excluded; confirmation rechecks state. Unfinished disk-only
+history shows **Incomplete / unverified**, not Running: another process may still own it. Such entries
+are protected from cleanup; do not infer that they are stopped or consuming tokens from history alone. **Full cleanup deletes
 checkpoint journals and prevents resume.** History-only retains the journal for explicit resume by ID.
 Only matching workspace run journals/summaries, local run artifacts and child sessions are eligible;
 source, plans, contracts, saved workflow definitions and unrelated sessions are not removed. No automatic
