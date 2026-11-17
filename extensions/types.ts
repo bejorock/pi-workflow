@@ -395,6 +395,7 @@ export interface SingleResult {
 	/** Completion-contract diagnostic; never replaces an existing execution failure. */
 	structuredOutputError?: string;
 	diagnostics?: ExecutionDiagnostics;
+	/** Original validated capture, not necessarily the latest journal correction. */
 	structuredOutputPath?: string;
 	structuredOutputSchemaPath?: string;
 	acceptance?: AcceptanceLedger;
@@ -425,6 +426,9 @@ export interface ArtifactPaths {
 	jsonlPath: string;
 	transcriptPath: string;
 	metadataPath: string;
+	/** Original validated structured capture; absent if capture was missing/invalid. */
+	structuredOutputPath?: string;
+	structuredOutputSchemaPath?: string;
 }
 
 export interface ArtifactConfig {

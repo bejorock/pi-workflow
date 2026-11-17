@@ -721,6 +721,12 @@ export function createNodeRunner(options: CreateNodeRunnerOptions): NodeRunner {
 			if (suffix.length > contract.maxHandoffChars) throw new Error("maxHandoffChars cannot fit output artifact reference.");
 			text = fullText.slice(0, contract.maxHandoffChars - suffix.length) + suffix;
 		}
+		// Capture references are independent of optional narrative artifacts.
+		// They describe the original validated submission, not later journal corrections.
+		const structuredArtifacts = single.structuredOutputPath ? {
+			structuredOutputPath: single.structuredOutputPath,
+			structuredOutputSchemaPath: single.structuredOutputSchemaPath,
+		} : {};
 		const tokens = usageTokens(single);
 		const rawUsage = single.usage as unknown as {input?: number; output?: number; cacheRead?: number; cacheWrite?: number; cost?: number | {total?: number; totalFromProvider?: boolean}} | undefined;
 		const cost = rawUsage?.cost;
@@ -743,7 +749,7 @@ export function createNodeRunner(options: CreateNodeRunnerOptions): NodeRunner {
 				// Drain the buffer for cleanup even though the graph aborts.
 				options.nodeStateBuffers?.drain(node.id);
 				return {
-					result: withResultText({ status: "failed", agent: agentName, text, error: classification.reason, ...completionDiagnostic, diagnostics: single.diagnostics, artifacts: single.artifactPaths, outputArtifact, sessionId }),
+					result: withResultText({ status: "failed", agent: agentName, text, error: classification.reason, ...completionDiagnostic, ...structuredArtifacts, diagnostics: single.diagnostics, artifacts: single.artifactPaths, outputArtifact, sessionId }),
 					technicalFailure: true,
 					error: classification.reason,
 					tokens,
@@ -758,7 +764,7 @@ export function createNodeRunner(options: CreateNodeRunnerOptions): NodeRunner {
 			parsed.data = options.nodeStateBuffers?.drain(node.id) ?? {};
 			return {
 				result: withResultText({ ...parsed, status: parsed.status === "ok" ? "blocked" : parsed.status, error: classification.reason, usage: tokens ? { tokens } : undefined, diagnostics: single.diagnostics, artifacts: single.artifactPaths, outputArtifact,
-					...completionDiagnostic,
+					...completionDiagnostic, ...structuredArtifacts,
 					...(contract.outputSchema && schemaOnlyFailure ? {contractError: single.structuredOutputError, completionSchema: contract.outputSchema} : {}) }),
 				error: contract.outputSchema && schemaOnlyFailure ? undefined : classification.reason,
 				tokens,
@@ -769,7 +775,7 @@ export function createNodeRunner(options: CreateNodeRunnerOptions): NodeRunner {
 
 		const parsed = parseAgentResult(text, agentName);
 		if (tokens) parsed.usage = { tokens };
-		Object.assign(parsed, {diagnostics: single.diagnostics, artifacts: single.artifactPaths, outputArtifact});
+		Object.assign(parsed, {diagnostics: single.diagnostics, artifacts: single.artifactPaths, outputArtifact, ...structuredArtifacts});
 		parsed.data = options.nodeStateBuffers?.drain(node.id) ?? {};
 		if (contract.outputSchema) {
 			const validation = await validateStructuredOutputValue(contract.outputSchema, single.structuredOutput);

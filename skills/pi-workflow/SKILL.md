@@ -95,6 +95,13 @@ Controlled graph supervisor requests do not expire on a wall-clock timer during 
   it does not run agents, commands or fn bodies and cannot prove all arbitrary callback routes.
 - Delivery completion is not engine completion, and engine completion is not reviewer acceptance.
   Inspect `details.runStatus`, actual execution paths, and explicit application verdict data.
+- Structured-only completion may leave `result.text` and narrative `output.md` empty. Hand off
+  `JSON.stringify(s.review.data)` explicitly; never assume an `output.md` path contains structured
+  findings. Validated captures expose `result.structuredOutputPath`/`structuredOutputSchemaPath`,
+  independent of optional narrative artifacts. Paths refer to the original submission, not a later
+  `workflow_correct_result` correction: current journal `result.data` is authoritative. A capture is
+  not an approval verdict and does not override an execution failure. Contract captures under
+  `.pi-workflow/artifacts/contracts/<runId>/` are outside the current `/runs … files` cleanup scope.
 - Optional `agent(name, promptFn, {outputSchema, requiredTools, handoff, maxHandoffChars, dependencies})`
   contracts validate structured completion into `result.data`, preflight required tools (never grant
   them), project named state fields, preserve full oversize handoffs as artifacts, and verify exact

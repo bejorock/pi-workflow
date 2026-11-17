@@ -738,6 +738,20 @@ before dispatch and resume: stale briefings require reassessment. Handoff field 
 oversize prompt/output is bounded with a reference to its complete private artifact, not silently lost.
 A schema object itself can still be large; use a compact schema and artifacts for large payloads.
 
+**Structured handoffs:** pass `s.review.data` explicitly, not an unchecked `output.md` path:
+```js
+g.node('implement', agent('green', s => `Address these review findings:\n${JSON.stringify(s.review.data)}`));
+```
+`output.md` and `result.text` contain narrative only and may legitimately be empty after a
+structured-only completion. A validated capture adds `result.structuredOutputPath` and
+`result.structuredOutputSchemaPath` (also in narrative artifact paths/`metadata.json` when enabled).
+These references are available even when optional narrative artifacts are disabled. They identify
+original capture/schema files under `.pi-workflow/artifacts/contracts/<runId>/`; a missing or invalid
+capture is not advertised as validated. A validated capture does not override an execution failure
+or imply an approval verdict. Later `workflow_correct_result` changes journal metadata, not the
+original capture: use current `result.data` via `workflow_status`/resume as the authoritative value.
+These contract files are currently outside `/runs … files` cleanup; no cleanup scope is expanded.
+
 `workflow_correct_result({runId, step, value})` validates completion metadata against the original
 schema for a settled schema-failed node and appends a correction record. It never reruns writes,
 changes technical failures, replays routing, or retroactively declares application acceptance.

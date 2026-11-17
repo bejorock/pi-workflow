@@ -171,6 +171,8 @@ describe("turn-budget parent-side backstop (execution.ts)", () => {
 		});
 		if (cancel) clearTimeout(cancel);
 		expect(result.structuredOutputFailed).toBe(true);
+		expect(result.structuredOutputPath).toBeUndefined();
+		expect(result.structuredOutputSchemaPath).toBeUndefined();
 		expect(result.structuredOutputError).toContain("Missing structured_output call");
 		if (kind === "generation") {
 			expect(result.error).toContain("Model generation exceeded 300ms");
@@ -188,6 +190,37 @@ describe("turn-budget parent-side backstop (execution.ts)", () => {
 			expect(classifySingleResultFailure(result)).toMatchObject({class: "agent", code: "agent-error"});
 		}
 	}, 15000);
+
+	it.each([true, false])("exposes validated structured captures with narrative artifacts enabled=%s without fabricating prose", async (enabled) => {
+		const schemaPath = path.join(tempDir, "schema.json");
+		const outputPath = path.join(tempDir, "result.json");
+		const value = {verdict: "request_changes", evidence: ["actual finding"]};
+		fs.writeFileSync(schemaPath, JSON.stringify({type: "object"}));
+		const binary = path.join(tempDir, "structured.cjs");
+		fs.writeFileSync(binary, `#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(outputPath)}, ${JSON.stringify(JSON.stringify(value))}); console.log(JSON.stringify({type:'agent_end',messages:[{role:'assistant',content:[{type:'toolCall',id:'capture',name:'structured_output',arguments:{value:${JSON.stringify(value)}}}]}]}));`, {mode: 0o755});
+		process.env[PI_SUBAGENT_PI_BINARY_ENV] = binary;
+		const result = await runSingleAgent(tempDir, makeAgent(), "review", {
+			runId: "structured-capture", structuredOutput: {schema: {type: "object"}, schemaPath, outputPath},
+			artifactConfig: {enabled, includeInput: true, includeOutput: true, includeJsonl: true, includeMetadata: true, cleanupDays: 7},
+		});
+		expect(result).toMatchObject({exitCode: 0, finalOutput: "", structuredOutput: value, structuredOutputPath: outputPath, structuredOutputSchemaPath: schemaPath});
+		if (enabled) {
+			expect(result.artifactPaths).toMatchObject({structuredOutputPath: outputPath, structuredOutputSchemaPath: schemaPath});
+			expect(fs.readFileSync(result.artifactPaths!.outputPath, "utf8")).toBe("");
+			expect(JSON.parse(fs.readFileSync(result.artifactPaths!.metadataPath, "utf8"))).toMatchObject({structuredOutputPath: outputPath, structuredOutputSchemaPath: schemaPath});
+		} else expect(result.artifactPaths).toBeUndefined();
+	});
+
+	it("does not advertise an invalid structured capture as a valid result artifact", async () => {
+		const outputPath = path.join(tempDir, "invalid.json");
+		const binary = path.join(tempDir, "invalid.cjs");
+		fs.writeFileSync(binary, `#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(outputPath)}, 'not JSON');`, {mode: 0o755});
+		process.env[PI_SUBAGENT_PI_BINARY_ENV] = binary;
+		const result = await runSingleAgent(tempDir, makeAgent(), "invalid", {runId: "invalid", structuredOutput: {schema: {type: "object"}, schemaPath: path.join(tempDir, "schema.json"), outputPath}});
+		expect(result.structuredOutputFailed).toBe(true);
+		expect(result.structuredOutputPath).toBeUndefined();
+		expect(result.structuredOutputSchemaPath).toBeUndefined();
+	});
 
 	it("applies DEFAULT_TURN_BUDGET (maxTurns: 50) when neither the call site nor agent frontmatter set one", async () => {
 		const scriptPath = writeHealthyPiBinary(tempDir, 3); // well under the default of 50

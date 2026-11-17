@@ -760,6 +760,15 @@ async function runSingleAttempt(
 			if (!executionFailed) result.error = structured.error;
 		} else {
 			result.structuredOutput = structured.value;
+			result.structuredOutputPath = options.structuredOutput.outputPath;
+			result.structuredOutputSchemaPath = options.structuredOutput.schemaPath;
+			if (result.artifactPaths) {
+				// Do not mutate shared attempt paths: a later failed attempt must
+				// never inherit references to an earlier validated capture.
+				result.artifactPaths = { ...result.artifactPaths,
+					structuredOutputPath: result.structuredOutputPath,
+					structuredOutputSchemaPath: result.structuredOutputSchemaPath };
+			}
 		}
 	}
 
@@ -846,6 +855,10 @@ async function runSingleAttempt(
 				turns: result.usage.turns,
 				tokens: result.usage,
 				acceptance: result.acceptance,
+				...(result.structuredOutputPath ? {
+					structuredOutputPath: result.structuredOutputPath,
+					structuredOutputSchemaPath: result.structuredOutputSchemaPath,
+				} : {}),
 			});
 		} catch {
 			// Artifact writing is best-effort

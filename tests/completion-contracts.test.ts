@@ -39,6 +39,17 @@ it.each(["timeout", "provider", "schema-only"])("does not expose %s as correctab
   }
  }finally{fs.rmSync(cwd,{recursive:true,force:true});}
 });
+it("preserves additive structured references through graph execution and journal reload without changing text/data", async()=>{
+ const cwd=fs.mkdtempSync(path.join(os.tmpdir(),"completion-paths-"));try{
+  const structuredOutputPath=path.join(cwd,"capture.json"), structuredOutputSchemaPath=path.join(cwd,"schema.json");
+  const spawn=vi.fn().mockResolvedValue({exitCode:0,messages:[],finalOutput:"",structuredOutput:{verdict:"reject"},structuredOutputPath,structuredOutputSchemaPath});
+  const run=createNodeRunner({cwd,runId:"test",spawnAgent:spawn as never});
+  const result=await run(node({outputSchema:schema}),{}, {step:1,runId:"test"});
+  expect(result.result).toMatchObject({status:"ok",text:"",data:{verdict:"reject"},structuredOutputPath,structuredOutputSchemaPath});
+  const file=path.join(cwd,"journal.jsonl");fs.writeFileSync(file,JSON.stringify({type:"node",step:1,nodeId:"review",status:"ok",result:result.result})+"\n");
+  expect(readGraphJournal(file)[0]).toMatchObject({result:{text:"",data:{verdict:"reject"},structuredOutputPath,structuredOutputSchemaPath}});
+ }finally{fs.rmSync(cwd,{recursive:true,force:true});}
+});
 it("bounds final message handoff and keeps full output in an artifact",async()=>{
  const cwd=fs.mkdtempSync(path.join(os.tmpdir(),"completion-"));try{
   const text="original ".repeat(1000);const spawn=vi.fn().mockResolvedValue({exitCode:0,messages:[{role:"assistant",content:[{type:"text",text}]}]});
@@ -49,12 +60,12 @@ it("bounds final message handoff and keeps full output in an artifact",async()=>
 it("corrects schema-only completion metadata, preserving technical failures and requiring a settled journal",async()=>{
  const cwd=fs.mkdtempSync(path.join(os.tmpdir(),"correct-"));try{
   const dir=path.join(cwd,".pi-workflow/runs");fs.mkdirSync(dir,{recursive:true});const file=path.join(dir,"run.jsonl");
-  const records=[{type:"node",step:1,nodeId:"review",status:"ok",result:{status:"blocked",contractError:"invalid",completionSchema:schema}},{type:"graph_result",status:"completed"}];
+  const records=[{type:"node",step:1,nodeId:"review",status:"ok",result:{status:"blocked",contractError:"invalid",completionSchema:schema,structuredOutputPath:"original-capture.json"}},{type:"graph_result",status:"completed"}];
   fs.writeFileSync(file,records.map(r=>JSON.stringify(r)).join("\n")+"\n");let tool:any;
   registerResultCorrectionTool({registerTool:(t:any)=>tool=t} as never,new WorkflowManager());
   const call=(value:unknown)=>tool.execute("id",{runId:"run",step:1,value},undefined,undefined,{cwd});
   await expect(call({verdict:"nonsense"})).rejects.toThrow();await call({verdict:"accept"});
-  expect(readGraphJournal(file).find(r=>r.type==="node")).toMatchObject({result:{data:{verdict:"accept"},metadataCorrected:true}});
+  expect(readGraphJournal(file).find(r=>r.type==="node")).toMatchObject({result:{data:{verdict:"accept"},metadataCorrected:true,structuredOutputPath:"original-capture.json"}});
   records[0].status="failed";fs.writeFileSync(file,records.map(r=>JSON.stringify(r)).join("\n")+"\n");await expect(call({verdict:"accept"})).rejects.toThrow("technical");
  }finally{fs.rmSync(cwd,{recursive:true,force:true});}
 });
