@@ -998,8 +998,8 @@ without being forced to read them.
 | `/runs delete <runId> [files]` | Confirm removal of selected history; add `files` to reclaim run-owned disk space |
 | `/runs clear [files]` | Confirm cleanup of eligible settled history in this workspace, including previously hidden runs when `files` is supplied |
 | `/workflows` | Saved workflow library: highlighted Code / terminal Diagram previews, confirmed deletion |
-| `/plans` | Interactive TUI navigator: browse and read plans in `.pi-workflow/plans/` |
-| `/contracts` | Interactive TUI navigator: browse contracts with type/status colour coding |
+| `/plans` | Browse plans with themed Markdown; `v` toggles raw source |
+| `/contracts` | Browse contracts with type/status badges and themed Markdown; `v` toggles raw source |
 | `/wf normal\|plan\|workflow` | Switch execution mode (Normal, Plan, or Workflow) |
 | `/agents` | Show the discovered agent roster |
 
@@ -1031,6 +1031,14 @@ refresh, selection or theme invalidation; very large diagrams require scrolling.
 Press `d` to request deletion of the selected project/user script, then `y` to confirm (any other key
 cancels). Bundled scripts are read-only. Changed files must be reconfirmed; symlink paths are refused.
 Deleting a saved script does not delete run history, source files outside the library, plans or contracts.
+
+The `/plans` and `/contracts` readers use Pi's built-in Markdown component (no extra dependency).
+Open with Enter/Right, scroll with arrows or j/k, PgUp/PgDn and Home/End, and press `v` to toggle
+rendered Markdown / source. Esc/Left returns to the list; q closes. Contract metadata appears above
+the document instead of its generated YAML frontmatter; source view retains that frontmatter.
+Both views wrap to the terminal width and are read-only. Images are not fetched, hyperlinks are
+non-interactive, and embedded terminal control sequences are removed. Markdown above 128 KiB
+shows a source-view hint rather than attempting expensive Markdown layout.
 The old `/saved-workflows` command is removed; `/runs` is the separate execution/history panel.
 
 In `/runs`, select a workflow graph and press **`v`** for its Diagram, then **`v`** again for Code.

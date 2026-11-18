@@ -12,7 +12,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ExtensionAPI, ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
-import type { Component, TUI } from "@earendil-works/pi-tui";
+import type { TUI } from "@earendil-works/pi-tui";
+import { DocumentReader } from "./document-reader.ts";
 import { parseKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { listAllContracts, contractsDir, type ContractMeta, type ContractStatus, type ContractType } from "./contract-tool.ts";
 
@@ -146,27 +147,15 @@ function renderListContent(state: NavState, theme: Theme, innerWidth: number, co
 	return lines;
 }
 
-function renderReaderContent(state: NavState, _theme: Theme, innerWidth: number, contentRows: number): string[] {
-	const lines: string[] = [];
-	const id = state.selectedId ?? "";
-
-	lines.push(`📄 ${id}.md`);
-	lines.push("↑/↓ scroll  · esc/← back to list  · q quit");
-	lines.push("─".repeat(Math.min(innerWidth, 50)));
-	lines.push("");
-
-	const contentLines = (state.selectedContent ?? "").split("\n");
-	const maxVisible = Math.max(1, contentRows - lines.length - 1);
-	const clampedScroll = Math.min(state.scroll, Math.max(0, contentLines.length - maxVisible));
-	const slice = contentLines.slice(clampedScroll, clampedScroll + maxVisible);
-
-	for (const l of slice) lines.push(truncateToWidth(l, innerWidth));
-
-	if (contentLines.length > maxVisible) {
-		const pct = Math.round((clampedScroll / Math.max(1, contentLines.length - maxVisible)) * 100);
-		lines.push(`— ${pct}% (${contentLines.length} lines) —`);
-	}
-	return lines;
+function renderReaderContent(state: NavState, reader: DocumentReader, innerWidth: number, contentRows: number): string[] {
+	const contract = state.contracts.find(c => c.id === state.selectedId);
+	const result = reader.render(state.selectedContent ?? "", [
+		`📄 ${state.selectedId ?? ""}.md`,
+		...(contract ? [`${contract.type} · ${contract.status} · v${contract.version} · ${contract.producer} → ${contract.consumer}`,
+			`Updated: ${contract.updated.slice(0, 10)}${contract.supersedes ? ` · supersedes ${contract.supersedes}` : ""}`] : []),
+	], innerWidth, contentRows, state.scroll);
+	state.scroll = result.scroll;
+	return result.lines;
 }
 
 // ── Key handling ─────────────────────────────────────────────────────────
@@ -174,13 +163,13 @@ function renderReaderContent(state: NavState, _theme: Theme, innerWidth: number,
 function handleKey(data: string, state: NavState, cwd: string): { state: NavState; close: boolean } {
 	const key = parseKey(data) ?? data;
 
-	if (key === "q" || (key === "escape" && state.view === "list")) return { state, close: true };
+	if (key === "q" || ((key === "escape" || key === "esc") && state.view === "list")) return { state, close: true };
 
 	if (state.view === "list") {
 		const count = state.contracts.length;
 		if (key === "up" || key === "k") return { state: { ...state, cursor: Math.max(0, state.cursor - 1) }, close: false };
 		if (key === "down" || key === "j") return { state: { ...state, cursor: Math.min(Math.max(0, count - 1), state.cursor + 1) }, close: false };
-		if ((key === "return" || key === "right") && count > 0) {
+		if ((key === "enter" || key === "return" || key === "right") && count > 0) {
 			const c = state.contracts[state.cursor];
 			if (c) {
 				return { state: { ...state, view: "reader", scroll: 0, selectedId: c.id, selectedContent: readContractContent(cwd, c.id) }, close: false };
@@ -190,7 +179,11 @@ function handleKey(data: string, state: NavState, cwd: string): { state: NavStat
 	}
 
 	if (state.view === "reader") {
-		if (key === "escape" || key === "left") return { state: { ...state, view: "list", scroll: 0, selectedId: null, selectedContent: null }, close: false };
+		if (key === "escape" || key === "esc" || key === "left") return { state: { ...state, view: "list", scroll: 0, selectedId: null, selectedContent: null }, close: false };
+		if (key === "home") return {state: {...state, scroll: 0}, close: false};
+		if (key === "end") return {state: {...state, scroll: Number.MAX_SAFE_INTEGER}, close: false};
+		if (key === "pageUp" || key === "pageup") return {state: {...state, scroll: Math.max(0, state.scroll - 15)}, close: false};
+		if (key === "pageDown" || key === "pagedown") return {state: {...state, scroll: state.scroll + 15}, close: false};
 		if (key === "up" || key === "k") return { state: { ...state, scroll: Math.max(0, state.scroll - 1) }, close: false };
 		if (key === "down" || key === "j") return { state: { ...state, scroll: state.scroll + 1 }, close: false };
 	}
@@ -206,6 +199,7 @@ export function openContractsNavigator(
 	ui: ExtensionUIContext,
 ): Promise<void> {
 	let state = freshState(cwd);
+	const reader = new DocumentReader();
 
 	return ui.custom<void>(
 		(tui: TUI, theme: Theme, _keybindings, done: (r: undefined) => void) => {
@@ -214,7 +208,7 @@ export function openContractsNavigator(
 			const component = {
 				get focused(): boolean { return _focused; },
 				set focused(v: boolean) { _focused = v; },
-				invalidate(): void {},
+				invalidate(): void { reader.invalidate(); },
 
 				render(width: number): string[] {
 					const borderColor = (s: string) =>
@@ -223,14 +217,14 @@ export function openContractsNavigator(
 						_focused ? theme.fg("dim", theme.bold(s)) : theme.fg("muted", s);
 					const bgColor = (s: string) => theme.bg("customMessageBg", s) ?? s;
 
-					const innerWidth = Math.max(10, width - BOX_BORDER_OVERHEAD);
+					const innerWidth = Math.max(1, width - BOX_BORDER_OVERHEAD);
 					const terminalRows = tui.terminal?.rows ?? 24;
 					const overlayRows = Math.max(8, Math.floor(terminalRows * 0.92));
 					const contentRows = Math.max(6, overlayRows - 2);
 
 					const rawLines = state.view === "list"
 						? renderListContent(state, theme, innerWidth, contentRows)
-						: renderReaderContent(state, theme, innerWidth, contentRows);
+						: renderReaderContent(state, reader, innerWidth, contentRows);
 
 					const panelTitle = state.view === "list"
 						? " contracts "
@@ -251,12 +245,17 @@ export function openContractsNavigator(
 						return bgColor(fullLine + (trailingPad > 0 ? " ".repeat(trailingPad) : ""));
 					};
 
-					return [bgColor(topBorder), ...rawLines.map(wrapAndBg), bgColor(botBorder)];
+					return [bgColor(topBorder), ...rawLines.map(wrapAndBg), bgColor(botBorder)].map(line => truncateToWidth(line, width, "", true));
 				},
 
 				handleInput(data: string): void {
+					if (state.view === "reader" && (parseKey(data) ?? data) === "v") {
+						reader.toggle(); state.scroll = 0; tui.requestRender(); return;
+					}
+					const oldId = state.selectedId;
 					const result = handleKey(data, state, cwd);
 					state = result.state;
+					if (oldId !== state.selectedId) reader.reset();
 					if (result.close) {
 						done(undefined);
 					} else {
