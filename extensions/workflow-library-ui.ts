@@ -6,6 +6,7 @@ import { getLanguageFromPath, highlightCode, type ExtensionUIContext, type Theme
 import { sliceByColumn, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { keyToAction } from "./workflow-ui.ts";
 import { renderNavigatorPanel } from "./navigator-panel.ts";
+import { renderWorkflowDiagram, type WorkflowDiagram } from "./workflow-diagram.ts";
 import { BUILTIN_WORKFLOWS_DIR, getUserWorkflowsDir, getWorkflowLibraryDir, listSavedWorkflows, type SavedWorkflowInfo } from "./workflow-library.ts";
 
 const MAX_SCRIPT_BYTES = 2 * 1024 * 1024;
@@ -33,6 +34,27 @@ export class WorkflowLibraryPanel {
 	cursor = 0;
 	scroll = 0;
 	focus: "list" | "code" = "list";
+	view: "code" | "diagram" = "code";
+	horizontal = 0;
+	private source = "";
+	private diagram?: WorkflowDiagram;
+	private layout?: AbortController;
+	private generation = 0;
+	onChange: () => void = () => {};
+	dispose(): void { this.generation++; this.layout?.abort(); this.layout = undefined; }
+	private startDiagram(): void {
+		if (this.diagram) return;
+		this.diagram = {mermaid: "", lines: ["Rendering diagram…"], warnings: []};
+		const generation = this.generation;
+		this.layout = new AbortController();
+		void renderWorkflowDiagram(this.source, this.layout.signal).then(diagram => {
+			if (generation !== this.generation) return;
+			this.diagram = diagram; this.layout = undefined; this.onChange();
+		}).catch(error => {
+			if (generation !== this.generation) return;
+			this.diagram = {mermaid: "", lines: [clean(String(error))], warnings: []}; this.onChange();
+		});
+	}
 	notice = "";
 	code: string[] = [];
 	pending?: { entry: SavedWorkflowInfo; fingerprint: string };
@@ -46,14 +68,15 @@ export class WorkflowLibraryPanel {
 		catch (error) { this.entries = []; this.notice = String(error); }
 		const index = this.entries.findIndex(e => e.filePath === old);
 		this.cursor = index >= 0 ? index : Math.min(this.cursor, Math.max(0, this.entries.length - 1));
-		this.loadedPath = undefined; this.scroll = 0; this.pending = undefined;
+		this.loadedPath = undefined; this.scroll = 0; this.horizontal = 0; this.pending = undefined;
 	}
 	invalidate(): void { this.dirty = true; }
 	private loadCode(): void {
 		const entry = this.selected;
 		if (!this.dirty && this.loadedPath === entry?.filePath && entry) return;
-		if (this.loadedPath !== entry?.filePath) this.scroll = 0;
-		this.loadedPath = entry?.filePath; this.dirty = false; this.code = [];
+		if (this.loadedPath !== entry?.filePath) { this.scroll = 0; this.horizontal = 0; }
+		this.dispose();
+		this.loadedPath = entry?.filePath; this.dirty = false; this.code = []; this.source = ""; this.diagram = undefined;
 		if (!entry) return;
 		try {
 			const file = checkedPath(this.cwd, entry);
@@ -64,7 +87,8 @@ export class WorkflowLibraryPanel {
 				const bytes = Buffer.alloc(stat.size + 1);
 				const count = fs.readSync(fd, bytes, 0, bytes.length, 0);
 				if (count > MAX_SCRIPT_BYTES || count > stat.size) throw new Error("Script changed while reading; refresh to retry.");
-				this.code = this.colorize(clean(bytes.subarray(0, count).toString("utf8")), getLanguageFromPath(file));
+				this.source = bytes.subarray(0, count).toString("utf8");
+				this.code = this.colorize(clean(this.source), getLanguageFromPath(file));
 			} finally { fs.closeSync(fd); }
 		} catch (error) { this.code = [clean(String(error))]; }
 	}
@@ -83,6 +107,13 @@ export class WorkflowLibraryPanel {
 			this.pending = undefined; return false;
 		}
 		if (key === "r") { this.refresh(); return false; }
+		if (this.focus === "code" && key === "v") {
+			this.view = this.view === "code" ? "diagram" : "code";
+			this.scroll = 0; this.horizontal = 0; return false;
+		}
+		if (this.focus === "code" && this.view === "diagram" && (key === "[" || key === "]")) {
+			this.horizontal = Math.max(0, this.horizontal + (key === "]" ? 12 : -12)); return false;
+		}
 		if (key === "d" && this.selected) {
 			try {
 				if (this.selected.source === "builtin") throw new Error("Bundled workflows are read-only.");
@@ -135,6 +166,20 @@ export class WorkflowLibraryPanel {
 			const details = entry ? [`Workflow: ${oneLine(entry.name)} · ${entry.source}`, oneLine(entry.description),
 				`When: ${oneLine(entry.whenToUse ?? "Not specified")}`, `File: ${oneLine(entry.filePath)}`,
 				`${entry.sizeBytes} bytes · ${new Date(entry.savedAt).toISOString()} · preview only; never executed`, "─".repeat(w)] : [];
+			if (this.view === "diagram") {
+				if (this.source) this.startDiagram();
+				else this.diagram ??= {mermaid: "", lines: this.code, warnings: []};
+				const diagram = this.diagram!;
+				const warnings = diagram.warnings.map(text => dim(clean(text)));
+				const diagramRows = Math.max(1, rows - details.length - Math.min(warnings.length, 3) - 3);
+				this.scroll = Math.min(this.scroll, Math.max(0, diagram.lines.length - diagramRows));
+				const maxWidth = Math.max(0, ...diagram.lines.map(line => visibleWidth(line)));
+				this.horizontal = Math.min(this.horizontal, Math.max(0, maxWidth - w));
+				content = [...details, ...warnings.slice(0, 3),
+					...diagram.lines.slice(this.scroll, this.scroll + diagramRows).map(line => sliceByColumn(clean(line), this.horizontal, w)),
+					dim(`Diagram rows ${this.scroll + 1}–${Math.min(diagram.lines.length, this.scroll + diagramRows)}/${diagram.lines.length} · columns ${this.horizontal + 1}–${Math.min(maxWidth, this.horizontal + w)}/${maxWidth}`),
+					dim("v Code · ↑↓/jk/PgUp/PgDn scroll · [ ] pan · esc/←/h back · q close")];
+			} else {
 			const codeRows = Math.max(1, rows - details.length - 3);
 			// Wrap rather than steal Left/Right from the navigator's back/open keys.
 			const codeWidth = Math.max(1, w - 6);
@@ -149,7 +194,8 @@ export class WorkflowLibraryPanel {
 			this.scroll = Math.min(this.scroll, Math.max(0, body.length - codeRows));
 			content = [...details, ...body.slice(this.scroll, this.scroll + codeRows),
 				dim(`Code rows ${body.length ? this.scroll + 1 : 0}–${Math.min(body.length, this.scroll + codeRows)}/${body.length}`),
-				dim("↑↓/jk scroll · PgUp/PgDn · Home/End · esc/←/h back · r refresh · d delete · q close")];
+				dim("v Diagram · ↑↓/jk scroll · PgUp/PgDn · Home/End · esc/←/h back · r refresh · d delete · q close")];
+			}
 		}
 		content.push(this.pending ? `Delete ${oneLine(this.pending.entry.name)} (${this.pending.entry.source})? y confirm · any other key cancels` : oneLine(this.notice));
 		return content.map(fit).slice(0, rows);
@@ -160,7 +206,9 @@ export function openWorkflowLibrary(cwd: string, ui: ExtensionUIContext): Promis
 	const panel = new WorkflowLibraryPanel(cwd);
 	return ui.custom<void>((tui, theme, _keys, done) => {
 		let focused = false;
+		panel.onChange = () => tui.requestRender();
 		return {
+		dispose: () => panel.dispose(),
 		get focused() { return focused; },
 		set focused(value: boolean) { focused = value; },
 		invalidate: () => panel.invalidate(),

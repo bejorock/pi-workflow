@@ -679,8 +679,13 @@ Before writing a new workflow script from scratch, check whether a matching one 
 `/workflows` uses the same themed panel and list→reader navigation as `/runs`.
 Select with ↑/↓ or j/k; Enter/Right/l opens details and the full-width syntax-highlighted script.
 Escape/Left/h returns to the list (or closes from the list). ↑/↓ or j/k scrolls; PgUp/PgDn or
-Ctrl+B/F pages; Home/End or g/G jumps. Long lines wrap. Browsing never executes scripts.
-`r` refreshes, `q` closes, and `d` requests deletion of the selected project/user script;
+Ctrl+B/F pages; Home/End or g/G jumps. `v` switches Code / Diagram. Code wraps; diagrams
+scroll without wrapping (`[` / `]` pans horizontally). Diagrams use local `beautiful-mermaid` rendering
+of literal top-level declarations only: helpers/loops/arguments are not evaluated, conditional links
+are possible routes, and dynamic destinations stay unknown. The route list beneath the drawing is the
+direction reference; a saved diagram is neither an execution trace nor proof of approval. Scripts remain
+the source of truth. Unsupported/oversized previews explain their limitations; use Code to inspect them.
+Browsing never executes scripts. `r` refreshes, `q` closes, and `d` requests deletion of the selected project/user script;
 `y` confirms, any other key cancels. Bundled scripts are read-only.
 There is no `/saved-workflows` command or library widget.
 

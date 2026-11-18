@@ -997,7 +997,7 @@ without being forced to read them.
 | `/runs` | Unified run navigator: typed workflows, subagents and parallel delegations; `f` filters, `d` deletes selected, `c` clears the filtered list |
 | `/runs delete <runId> [files]` | Confirm removal of selected history; add `files` to reclaim run-owned disk space |
 | `/runs clear [files]` | Confirm cleanup of eligible settled history in this workspace, including previously hidden runs when `files` is supplied |
-| `/workflows` | Saved workflow library panel: browse details, preview highlighted scripts, confirmed deletion |
+| `/workflows` | Saved workflow library: highlighted Code / terminal Diagram previews, confirmed deletion |
 | `/plans` | Interactive TUI navigator: browse and read plans in `.pi-workflow/plans/` |
 | `/contracts` | Interactive TUI navigator: browse contracts with type/status colour coding |
 | `/wf normal\|plan\|workflow` | Switch execution mode (Normal, Plan, or Workflow) |
@@ -1012,8 +1012,22 @@ Browsing only reads and parses scripts; it never executes them.
 
 Navigation matches `/runs`: Escape/Left/h returns to the list (and closes from the list),
 ↑/↓ or j/k scrolls, PgUp/PgDn or Ctrl+B/F pages, Home/End or g/G jumps, and `q` closes.
-Long code lines wrap; there is no separate pane focus or horizontal-pan mode.
-Use `r` to refresh.
+Press `v` in the reader to switch **Code / Diagram**. Code lines wrap; diagrams do not:
+use `[` / `]` to pan horizontally and the same scroll/page keys vertically. Use `r` to refresh.
+
+Diagrams are rendered locally with `beautiful-mermaid`; no browser, external service, Kitty support,
+or additional executable is needed. Scripts remain the source of truth, not generated Markdown copies.
+The preview statically extracts literal top-level `graph()`, `g.node()` and `g.edge()` declarations;
+it **never evaluates definition code, routing functions, agents or commands**. Helpers, loops, aliases,
+arguments and other computed construction may make it incomplete. Conditional connections are labelled
+possible routes, with unresolved destinations shown as dynamic/unknown—not invented edges. Route markers
+keep retry connections distinct, and a directional route list below the drawing provides a reference.
+This is not an execution trace or an approval guarantee. Use Code for the complete original definition.
+Diagram previews are limited to 128 KiB of source, 24 nodes, 64 edge declarations and 96 expanded routes;
+unsupported scripts or renderer errors show an explanation while Code remains available. Layout runs in
+a disposable, memory-limited Node process with a two-second deadline, never on Pi's input/render loop. A timeout retains
+the statically extracted route list. Closing the panel cancels pending layout. Layout is cached until
+refresh, selection or theme invalidation; very large diagrams require scrolling.
 Press `d` to request deletion of the selected project/user script, then `y` to confirm (any other key
 cancels). Bundled scripts are read-only. Changed files must be reconfirmed; symlink paths are refused.
 Deleting a saved script does not delete run history, source files outside the library, plans or contracts.

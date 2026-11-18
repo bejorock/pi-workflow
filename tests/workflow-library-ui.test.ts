@@ -1,4 +1,4 @@
-import {afterEach, beforeEach, describe, expect, it} from "vitest";
+import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -63,6 +63,13 @@ describe("saved workflow library panel",()=>{
   }
   expect(colors).toContain("accent");expect(colors).toContain("dim");colors.length=0;
   renderNavigatorPanel("workflows",["body"],80,theme as any,false);expect(colors).toContain("borderMuted");expect(colors).toContain("muted");
+ });
+ it("switches Diagram/Code with bounded unwrapped panning and unchanged back navigation",async()=>{
+  const p=file("diagram",`const g=graph(); g.node('a_very_long_node_name_for_panning',()=> 'x'); g.node('other_long_node_name',()=> 'y'); g.edge('a_very_long_node_name_for_panning','other_long_node_name'); g.edge('other_long_node_name',END);`);
+  const panel=new WorkflowLibraryPanel(cwd,plain);select(panel,p);panel.key("enter");panel.key("v");
+  expect(panel.view).toBe("diagram");panel.render(60,35);await vi.waitFor(()=>expect(panel.render(60,35).join("\n")).toContain("┌"));let lines=panel.render(60,35);expect(lines.join("\n")).toContain("Diagram rows");panel.key("]");panel.render(30,35);expect(panel.horizontal).toBeGreaterThan(0);
+  for(const width of [20,45,100]) for(const line of panel.render(width,25)) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+  panel.key("[");panel.key("end");expect(panel.render(100,35).join("\n")).toContain("Declared routes");panel.key("v");expect(panel.view).toBe("code");expect(panel.scroll).toBe(0);expect(panel.horizontal).toBe(0);expect(panel.render(100,35).join("\n")).toContain("Code rows");panel.key("h");expect(panel.focus).toBe("list");
  });
  it("opens an overlay without creating a widget and closes on q",async()=>{
   let closed=false;
