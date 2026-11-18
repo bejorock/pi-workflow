@@ -17,6 +17,7 @@ import { planRunCleanup, executeRunCleanup, cleanupDescription, type CleanupPlan
 import type { WorkflowAgentSnapshot, AgentHistoryEntry, WorkflowPhaseSnapshot } from "./workflow-display-types.ts";
 import { saveWorkflowScript } from "./workflow-library.ts";
 import { renderNavigatorPanel } from "./navigator-panel.ts";
+import { RunDefinitionReader } from "./run-definition-ui.ts";
 
 export type ViewKind = "runs" | "phases" | "agents" | "detail";
 
@@ -514,7 +515,7 @@ export function renderNavigatorFrame(
 		}
 
 		lines.push("");
-		lines.push(dim("↑/↓ select · enter open · f filter · d delete · c clear · p/x/r control · s save · q quit"));
+		lines.push(dim("↑/↓ select · enter open · v Diagram/Code · f filter · d delete · c clear · p/x/r control · s save · q quit"));
 
 	} else if ((state.kind === "phases" || state.kind === "agents") && state.runId) {
 		const phases = model.phases(state.runId);
@@ -634,8 +635,8 @@ export function renderNavigatorFrame(
 		lines.push("");
 		lines.push(dim(
 			inAgents
-				? "enter open detail · esc back · ↑/↓ select · s save · q quit"
-				: "enter select phase · esc back · ↑/↓ select · s save · q quit"
+				? "enter open detail · v Diagram/Code · esc back · ↑/↓ select · s save · q quit"
+				: "enter select phase · v Diagram/Code · esc back · ↑/↓ select · s save · q quit"
 		));
 
 	} else if (state.kind === "detail" && state.runId && state.agentId !== undefined) {
@@ -711,7 +712,7 @@ export function renderNavigatorFrame(
 		lines.push("");
 		lines.push(dim(state.pagerOpen
 			? "↑/↓ scroll · g/G ends · t tail · enter close pager · esc back"
-			: "enter open pager · t tail · s save workflow · esc back · q quit"
+			: "enter open pager · t tail · v Diagram/Code · s save workflow · esc back · q quit"
 		));
 	}
 
@@ -766,11 +767,8 @@ function scrollWindow(total: number, active: number, cap: number): { start: numb
  * (.pi-workflow/workflows/<meta.name>.js), so it can be re-run later via
  * the workflow tool's `loadWorkflow` parameter without rewriting it.
  *
- * The raw script text is only kept in-memory on the ManagedRun (see
- * WorkflowManager.registerRun/getRunSource) — it is intentionally never
- * written to the journal (only a hash is, for cache invalidation), so this
- * only works for runs still tracked live in this process, not ones
- * restored purely from a persisted journal after a restart.
+ * Source is retained in memory and in a separate, hash-verified definition snapshot.
+ * Older runs without a snapshot remain unavailable after restart.
  */
 export async function saveRunWorkflow(manager: WorkflowManager, runId: string, ui: ExtensionUIContext): Promise<void> {
 	const run = manager.getRun(runId);
@@ -779,12 +777,13 @@ export async function saveRunWorkflow(manager: WorkflowManager, runId: string, u
 		ui.notify(
 			run
 				? "Can't save this workflow: its script is no longer available in memory (only possible right after it starts in this session)."
-				: "Can't save this workflow: it's a persisted run from a prior session, and only a hash of its script (not the script itself) is stored in the journal.",
+				: "Can't save this workflow: no verified definition snapshot is available.",
 			"warning",
 		);
 		return;
 	}
-	const meta = run?.snapshot.meta;
+	const savedRun = !run ? manager.listRuns().find(row => row.runId === runId) : undefined;
+	const meta = run?.snapshot.meta ?? (savedRun ? {name: savedRun.workflowName, description: "Saved from a run definition snapshot"} : undefined);
 	if (!meta) {
 		ui.notify("Can't save this workflow: missing metadata.", "warning");
 		return;
@@ -824,7 +823,9 @@ export function openWorkflowNavigator(
 			for (const ev of events) manager.on(ev, onEvent);
 			manager.on("agentHistory", onHistoryEvent);
 
+			let definition: RunDefinitionReader | undefined;
 			const cleanup = () => {
+				definition?.dispose();
 				for (const ev of events) manager.off(ev, onEvent);
 				manager.off("agentHistory", onHistoryEvent);
 				if (historyRenderTimer) clearTimeout(historyRenderTimer);
@@ -847,7 +848,7 @@ export function openWorkflowNavigator(
 					const terminalRows = tui.terminal?.rows ?? 24;
 					const overlayRows = Math.max(8, Math.floor(terminalRows * 0.92));
 					const contentRows = Math.max(6, overlayRows - 2);
-					const raw = pending
+					const raw = definition ? definition.render(innerWidth, contentRows, theme) : pending
 						? [theme.bold("Delete run history"), ...((pending.plan ? cleanupDescription(pending.plan) : "Choose cleanup mode. Active/stopping/waiting runs are excluded.").match(new RegExp(`.{1,${Math.max(10, innerWidth - 2)}}`, "g")) ?? []), "", pending.plan ? "y confirm · any other key cancel" : "h history only · d delete owned files · esc cancel", "Full file cleanup deletes checkpoints and prevents resume."]
 						: renderNavigatorFrame(state, model, innerWidth, themeAdapter, contentRows);
 					if (notice && !pending) raw.push(theme.fg("warning", truncateToWidth(notice, innerWidth)));
@@ -855,6 +856,20 @@ export function openWorkflowNavigator(
 				},
 
 				handleInput(data: string): void {
+					if (definition) {
+						const action = definition.key(data, Math.max(1, Math.floor(tui.terminal.rows * .92) - 12));
+						if (action === "back") { definition.dispose(); definition = undefined; }
+						if (action === "close") { cleanup(); done(undefined); return; }
+						rerender(); return;
+					}
+					if (!pending && data === "v") {
+						const rows = model.runs();
+						const id = state.kind === "runs" ? rows[state.cursor]?.runId : state.runId;
+						const run = rows.find(row => row.runId === id);
+						if (id && run?.runKind === "workflow") definition = new RunDefinitionReader(id, manager.getRunSource(id)?.script, rerender);
+						else notice = "Definition views are available for workflow graph runs only.";
+						rerender(); return;
+					}
 					if (pending) {
 						try {
 							if (pending.plan) {
@@ -953,6 +968,7 @@ export function openWorkflowNavigator(
 				},
 
 				invalidate(): void {
+					definition?.invalidate();
 					rerender();
 				},
 				dispose(): void {

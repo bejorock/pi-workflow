@@ -13,6 +13,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { WorkflowController } from "./workflow-controller.ts";
 import { withRunCard } from "./run-card.ts";
+import { writeRunDefinition } from "./run-definition.ts";
 import { WorkflowManager as ControllerManager } from "./workflow-manager.ts";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -421,6 +422,7 @@ export function createGraphWorkflowTool(options: GraphToolOptions = {}): ToolDef
 
 			let display: GraphDisplayBridge | undefined;
 			try {
+				writeRunDefinition(journalDir, runId, script);
 				display = options.workflowManager
 					? new GraphDisplayBridge({
 							manager: options.workflowManager,

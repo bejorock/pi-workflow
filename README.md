@@ -1033,6 +1033,19 @@ cancels). Bundled scripts are read-only. Changed files must be reconfirmed; syml
 Deleting a saved script does not delete run history, source files outside the library, plans or contracts.
 The old `/saved-workflows` command is removed; `/runs` is the separate execution/history panel.
 
+In `/runs`, select a workflow graph and press **`v`** for its Diagram, then **`v`** again for Code.
+Escape/Left/h returns to the existing execution view. This uses the exact submitted source, including
+inline workflows—not today's saved library file. The same local renderer, static-route caveats,
+scrolling and `[ ]` panning apply. Subagent and parallel delegations retain their normal details.
+
+New graph runs atomically store `.pi-workflow/runs/<runId>.definition.js` (owner-only permissions,
+maximum 2 MiB) alongside their journal and summary. Source snapshots may contain literal prompts or
+other values in your script; treat them as local run artifacts. After restart, snapshots are checked
+against the journal's SHA-256 before viewing. Missing, altered or legacy snapshots show **definition
+unavailable**; the panel never falls back to a potentially changed saved script and never executes a
+snapshot. A conflicting existing snapshot prevents starting/resuming under that run ID. Definition
+snapshots capture source, not evaluated arguments or an execution trace.
+
 ### Foreground controller over background execution
 
 Every `workflow()` call now waits for the run's final report **or supervisor attention**. The graph
@@ -1117,7 +1130,7 @@ At the run list, `d` selects one run and `c` selects the current filtered list. 
 above provide the same confirmation. History-only removal hides entries durably but reclaims no disk
 space; `/runs clear files` or `/runs delete <runId> files` can later clean hidden entries too.
 
-Full cleanup removes only the workspace's matching `.pi-workflow/runs/` journal/summary,
+Full cleanup removes only the workspace's matching `.pi-workflow/runs/` journal/summary/definition snapshot,
 `.pi-workflow/sessions/<runId>/`, and run-prefixed `.pi-workflow/artifacts/runs/` directories. It never
 removes source files, plans, contracts, unrelated Pi sessions, custom external artifact locations or saved
 workflow definitions. Symlinked cleanup paths are refused. **Full cleanup deletes checkpoints and prevents resume**; history-only cleanup hides the entry

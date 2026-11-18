@@ -689,7 +689,9 @@ Browsing never executes scripts. `r` refreshes, `q` closes, and `d` requests del
 `y` confirms, any other key cancels. Bundled scripts are read-only.
 There is no `/saved-workflows` command or library widget.
 
-The user can also save a workflow after the fact from the `/runs` TUI navigator by selecting a run and pressing `s` — no need to have passed `saveWorkflow: true` up front. This only works for runs still live in the current session (the script is kept in memory, not journaled); it won't work for runs restored from a prior session's journal.
+In `/runs`, select a workflow graph and press `v` to view its Diagram; `v` toggles Code, and Escape/Left/h returns to execution details. Inline and saved workflows use the exact submitted source. New runs keep an owner-only `.pi-workflow/runs/<runId>.definition.js` snapshot, verified against the journal hash after restart. Missing or mismatched snapshots show unavailable; do not reconstruct from a current library file or execute the snapshot. It captures source, not evaluated args or actual conditional decisions. History-only deletion keeps snapshots; full run-file cleanup deletes them. Source may include literal prompts or sensitive values, so treat it as a local run artifact.
+
+The user can also save a workflow after the fact from `/runs` by selecting a run and pressing `s` — no need for `saveWorkflow: true` up front. This works with in-memory source or a verified persisted snapshot; older runs without snapshots remain unavailable after restart.
 
 ## Session Execution Modes (`/wf`)
 

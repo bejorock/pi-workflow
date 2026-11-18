@@ -4,6 +4,7 @@
  */
 
 import { EventEmitter } from "node:events";
+import { readRunDefinition } from "./run-definition.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { WorkflowSnapshot, WorkflowAgentSnapshot, AgentHistoryEntry } from "./workflow-display-types.ts";
@@ -35,13 +36,7 @@ export interface ManagedRun {
 	updatedAt: number;
 	journalDir?: string;
 	abortController?: AbortController;
-	/**
-	 * The raw workflow script source and cwd it ran in, kept in-memory only
-	 * (never persisted to the journal) so the /workflows TUI navigator can
-	 * offer "save this workflow for reuse" without the caller having to
-	 * re-supply the script. Only available for runs still tracked in this
-	 * process (i.e. not runs restored from a journal after a restart).
-	 */
+	/** Exact run source, also snapshotted separately from the execution journal. */
 	script?: string;
 	cwd?: string;
 }
@@ -121,16 +116,11 @@ export class WorkflowManager extends EventEmitter {
 		return run;
 	}
 
-	/**
-	 * Get the raw script + cwd a run executed with, if this process still has
-	 * it in memory (see ManagedRun.script). Returns undefined for runs that
-	 * only exist as persisted journal entries (script text isn't journaled,
-	 * only a hash — see journal-types.ts).
-	 */
+	/** Exact in-memory source, or a persisted snapshot verified against the run journal hash. */
 	getRunSource(runId: string): { script: string; cwd: string } | undefined {
 		const run = this.runs.get(runId);
-		if (!run?.script || !run.cwd) return undefined;
-		return { script: run.script, cwd: run.cwd };
+		if (run?.script && run.cwd && (!this.journalDir || run.journalDir === this.journalDir)) return { script: run.script, cwd: run.cwd };
+		return this.journalDir ? readRunDefinition(this.journalDir, runId) : undefined;
 	}
 
 	getRun(runId: string): ManagedRun | undefined {

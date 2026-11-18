@@ -37,7 +37,7 @@ export function planRunCleanup(manager: WorkflowManager, ids: string[], mode: Cl
 	for (const id of [...new Set(ids)]) {
 		const run = visible.get(id);
 		if (!safeId(id) || !run || !manager.canDeleteRun(id)) { plan.skipped.push(id); continue; }
-		const candidates = mode === "history" ? [] : [path.join(dir, `${id}.jsonl`), path.join(dir, `${id}.run.json`), path.join(root, "sessions", id)];
+		const candidates = mode === "history" ? [] : [path.join(dir, `${id}.jsonl`), path.join(dir, `${id}.run.json`), path.join(dir, `${id}.definition.js`), path.join(root, "sessions", id)];
 		const artifacts = path.join(root, "artifacts", "runs");
 		if (mode === "files") {
 			assertSafePath(root, artifacts);
@@ -61,5 +61,5 @@ export function executeRunCleanup(manager: WorkflowManager, requested: CleanupPl
 	return plan;
 }
 export function cleanupDescription(plan: CleanupPlan): string {
-	return `${plan.runIds.length} run(s), ~${(plan.bytes / 1024 / 1024).toFixed(2)} MiB. ${plan.mode === "files" ? "Delete run journals, local artifacts and child sessions. Checkpoint resume will be lost. Custom artifact directories and untracked legacy subagent files are not included." : "Hide history only; files remain on disk (no space reclaimed)."} Source files, plans, contracts and unrelated sessions are never removed.${plan.skipped.length ? ` ${plan.skipped.length} active/unknown run(s) excluded.` : ""}`;
+	return `${plan.runIds.length} run(s), ~${(plan.bytes / 1024 / 1024).toFixed(2)} MiB. ${plan.mode === "files" ? "Delete run journals, definition snapshots, local artifacts and child sessions. Checkpoint resume will be lost. Custom artifact directories and untracked legacy subagent files are not included." : "Hide history only; files remain on disk (no space reclaimed)."} Source files, plans, contracts and unrelated sessions are never removed.${plan.skipped.length ? ` ${plan.skipped.length} active/unknown run(s) excluded.` : ""}`;
 }
