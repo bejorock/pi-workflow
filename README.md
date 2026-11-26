@@ -583,6 +583,11 @@ You can override a built-in agent completely by creating a markdown file with th
 
 Precedence order: `builtin < user < project`.
 
+The `subagent` tool runs project-local agents without a confirmation prompt by default.
+Pass `confirmProjectAgents: true` on a call to require confirmation in the interactive UI,
+or `agentScope: "user"` to exclude project definitions from that call. Review agent definitions
+in projects you don't trust before running them.
+
 ### Creating custom agents
 
 Author a markdown file in `.pi/agents/<name>.md` (project scope) or `~/.pi/agent/agents/<name>.md`

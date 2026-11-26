@@ -149,6 +149,38 @@ describe("subagent tool integration", () => {
 		expect(manager.getRun(runId)!.snapshot.agents[0].status).toBe("done");
 	});
 
+	it.each([
+		["omitted", {}, false, true],
+		["explicitly disabled", { confirmProjectAgents: false }, false, true],
+		["explicitly enabled and declined", { confirmProjectAgents: true }, true, false],
+		["explicitly enabled and accepted", { confirmProjectAgents: true }, true, true],
+	] as const)("uses the project agent confirmation policy when %s", async (_label, options, prompts, launches) => {
+		const runAgent = vi.mocked(runSingleAgent);
+		runAgent.mockClear().mockResolvedValue({
+			agent: "stub", task: "test", exitCode: 0, messages: [],
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 },
+		});
+		const confirm = vi.fn().mockResolvedValue(launches);
+		const ctx = {
+			cwd: tempDir,
+			hasUI: true,
+			ui: { confirm },
+			sessionManager: { getSessionId: () => "session" },
+		} as unknown as ExtensionContext;
+
+		const result = await registeredTool.execute("confirm", { agent: "stub", task: "test", ...options }, undefined, undefined, ctx);
+
+		expect(registeredTool.parameters.properties.confirmProjectAgents.default).toBe(false);
+		if (prompts) {
+			expect(confirm).toHaveBeenCalledExactlyOnceWith("Run project-local agents?", expect.stringContaining("Agents: stub"));
+		} else {
+			expect(confirm).not.toHaveBeenCalled();
+		}
+		expect(runAgent).toHaveBeenCalledTimes(launches ? 1 : 0);
+		if (!launches) expect(result.content[0].text).toBe("Project-local agent execution cancelled.");
+		runAgent.mockClear();
+	});
+
 	it("registers subagent run in manager and configures filesystem channel", async () => {
 		const mockResult = {
 			agent: "stub",
